@@ -215,13 +215,13 @@ lobster list
 - **测试用例**: `lobster test` 自动执行
 
 ## 关键文件
-- `python/features/registry.py` — 注册表核心（含 YAML 声明式加载）
+- `python/features/registry.py` — 注册表核心
 - `python/features/action_features.py` — 动作功能 (CLICK/TYPE/SCROLL/DRAG/HOTKEY)
 - `python/features/perception_features.py` — 感知功能 (OCR/图像/颜色/进度条)
 - `python/features/browser_features.py` — 浏览器功能（基于 Playwright）
 - `python/features/ai_debug_features.py` — AI + 调试功能
 - `python/mcp/server.py` — MCP 服务端（从 registry 动态生成工具 + 流式通知）
-- `cli/lobster.py` — CLI 入口（含 plugin search/install 市场命令）
+- `cli/lobster.py` — CLI 入口
 - `python/server.py` — HTTP 后端（registry 自动路由）
 - `python/engine/optimizer.py` — Telemetry 驱动 DSL 优化分析
 
@@ -235,13 +235,4 @@ lobster list
     }
   }
 }
-```
-
-## 插件市场
-```bash
-lobster plugin search <关键词>   # 搜索 GitHub 上 topic:lobster-plugin 的插件
-lobster plugin install <url>    # 从 URL 安装插件
-lobster plugin list             # 列出已安装插件
-lobster plugin load <path>      # 手动加载插件文件
-lobster plugin unload <name>    # 卸载插件
 ```
