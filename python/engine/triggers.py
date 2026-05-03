@@ -298,6 +298,9 @@ def _watch_process_exit(config: dict, stop: threading.Event) -> bool:
                 return True
             time.sleep(poll)
     return False
+
+
+def _watch_process_start(config: dict, stop: threading.Event) -> bool:
     """监控进程启动"""
     name = config.get("name", "").lower()
     poll = config.get("interval", 0.5)
