@@ -11,12 +11,17 @@
 ╚══════════════════════════════════════════════════════════════════╝
 """
 from __future__ import annotations
+import importlib
+import importlib.util
 import json
+import os
+import sys
 import time
 import traceback
 from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Dict, List, Optional
 from enum import Enum
+from pathlib import Path
 
 
 class FeatureCategory(str, Enum):
@@ -145,6 +150,93 @@ class FeatureRegistry:
         self._features[spec.name] = spec
         self._load_order.append(spec.name)
         return spec
+
+    @property
+    def plugins(self) -> List[dict]:
+        """已加载的插件列表"""
+        if not hasattr(self, "_plugins"):
+            self._plugins = {}
+        return [{"name": k, "path": str(v)} for k, v in self._plugins.items()]
+
+    def load_plugin(self, plugin_path: str, namespace: str = "") -> dict:
+        """
+        从外部路径加载功能插件
+
+        Args:
+            plugin_path: .py 文件路径或包含 __init__.py 的目录路径
+            namespace: 插件命名空间（可选，用于避免名称冲突）
+
+        Returns:
+            dict{success, features_loaded, error}
+        """
+        if not hasattr(self, "_plugins"):
+            self._plugins = {}
+
+        path = Path(plugin_path)
+        if not path.exists():
+            return {"success": False, "error": f"路径不存在: {plugin_path}"}
+
+        # 计算模块名
+        if path.is_file() and path.suffix == ".py":
+            module_name = namespace or f"lobster_plugin_{path.stem}"
+        elif path.is_dir():
+            init_file = path / "__init__.py"
+            if not init_file.exists():
+                return {"success": False, "error": f"目录插件需要 __init__.py: {plugin_path}"}
+            module_name = namespace or f"lobster_plugin_{path.name}"
+            path = init_file
+        else:
+            return {"success": False, "error": f"不支持的插件路径: {plugin_path}"}
+
+        if module_name in self._plugins:
+            return {"success": False, "error": f"插件 '{module_name}' 已加载"}
+
+        # 记录加载前的功能数
+        before_count = len(self._features)
+
+        try:
+            # 动态导入
+            spec = importlib.util.spec_from_file_location(module_name, str(path))
+            if spec is None or spec.loader is None:
+                return {"success": False, "error": f"无法加载模块: {module_name}"}
+            mod = importlib.util.module_from_spec(spec)
+            # 将模块加入 sys.modules 以便内部 import 正常工作
+            sys.modules[module_name] = mod
+            spec.loader.exec_module(mod)
+
+            loaded = len(self._features) - before_count
+            self._plugins[module_name] = str(path)
+
+            return {
+                "success": True,
+                "features_loaded": loaded,
+                "module": module_name,
+            }
+        except Exception as e:
+            return {"success": False, "error": f"加载插件失败: {e}"}
+
+    def unload_plugin(self, name_or_path: str) -> bool:
+        """卸载一个已加载的插件"""
+        if not hasattr(self, "_plugins"):
+            return False
+
+        # 按名称或路径查找
+        module_name = None
+        for m, p in list(self._plugins.items()):
+            if m == name_or_path or str(p) == name_or_path:
+                module_name = m
+                break
+
+        if not module_name:
+            return False
+
+        # 移除该模块注册的功能
+        # 注意：功能没有标记属于哪个插件，这里只从 plugins 列表移除
+        # 功能本身保留在 registry 中
+        del self._plugins[module_name]
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+        return True
 
     def get(self, name: str) -> Optional[FeatureSpec]:
         return self._features.get(name)

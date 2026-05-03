@@ -10,6 +10,7 @@ import re
 import time
 import threading
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from typing import Callable, Dict, Optional, Any
 from dataclasses import dataclass, field
@@ -218,6 +219,12 @@ class DSLExecutor:
         elif node.type == NodeType.RETURN:
             raise ReturnSignal(node.args)
 
+        elif node.type == NodeType.WHEN:
+            self._exec_when(node, ctx)
+
+        elif node.type == NodeType.PARALLEL:
+            self._exec_parallel(node, ctx)
+
         # SUBROUTINE 定义直接跳过（已在 parser 注册）
 
     # ── 指令执行 ─────────────────────────────────────────────────
@@ -303,6 +310,37 @@ class DSLExecutor:
             self._pop_scope()
             self._call_depth -= 1
 
+    def _exec_parallel(self, node: ASTNode, ctx: ExecutionContext):
+        """PARALLEL 并行执行：每个分支独立线程"""
+        branches = node.children
+        if not branches:
+            return
+        self._log(f"PARALLEL: {len(branches)} 个分支并行执行")
+
+        errors = []
+        with ThreadPoolExecutor(max_workers=len(branches)) as pool:
+            futures = {}
+            for i, branch in enumerate(branches):
+                future = pool.submit(self._execute_branch, branch, ctx, i)
+                futures[future] = i
+
+            for future in as_completed(futures):
+                branch_idx = futures[future]
+                try:
+                    future.result()
+                    self._log(f"  分支 {branch_idx} 完成")
+                except Exception as e:
+                    errors.append(f"分支 {branch_idx}: {e}")
+                    self._log(f"  分支 {branch_idx} 失败: {e}")
+
+        if errors:
+            self._log(f"PARALLEL 完成，{len(errors)} 个分支有错误")
+
+    def _execute_branch(self, node: ASTNode, ctx: ExecutionContext, branch_idx: int):
+        """在线程池中执行一个并行分支"""
+        for child in node.children:
+            self._execute_node(child, ctx)
+
     def _exec_import(self, node: ASTNode, ctx: ExecutionContext):
         path = node.args
         if not os.path.isabs(path):
@@ -316,6 +354,37 @@ class DSLExecutor:
         count = len(parser.subroutines)
         self._subroutines.update(parser.subroutines)
         self._log(f"IMPORT '{os.path.basename(path)}' ({count} 个子程序)")
+
+    def _exec_when(self, node: ASTNode, ctx: ExecutionContext):
+        """WHEN 事件注册：设置 watcher，不阻塞主流程"""
+        try:
+            from engine.triggers import get_trigger_engine, list_trigger_types
+            engine = get_trigger_engine()
+            if self._action_handler:
+                engine.set_action_handler(self._action_handler)
+
+            event_key = node.event_key
+            config_str = node.args
+
+            # 查找注册的 trigger type 匹配 event_key
+            trigger_types = list_trigger_types()
+            matched = [t for t in trigger_types if t["event_key"] == event_key]
+            if not matched:
+                self._log(f"  [WHEN] 未知事件类型: {event_key}")
+                return
+            spec_name = matched[0]["name"]
+
+            # 构建配置 dict
+            config = {}
+            if config_str:
+                config["path"] = config_str
+                config["title"] = config_str
+                config["name"] = config_str
+
+            inst = engine.register(spec_name, config, node.children)
+            self._log(f"  [WHEN] {event_key} 已注册 (id={inst.id})")
+        except Exception as e:
+            self._log(f"  [WHEN] 注册失败: {e}")
 
     # ── 动作调用 ─────────────────────────────────────────────────
     def _call_action(self, action: str, **kwargs) -> Any:

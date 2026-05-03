@@ -27,6 +27,9 @@ import features.multimedia_features  # noqa
 import features.fusion_features      # noqa
 import features.persistence_features # noqa
 import features.healing_features     # noqa
+import features.trigger_features     # noqa
+import features.ai_plan_features     # noqa
+import features.plugin_features      # noqa
 
 from features.registry import registry
 

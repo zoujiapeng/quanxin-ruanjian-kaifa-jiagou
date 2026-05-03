@@ -23,6 +23,9 @@ class NodeType(str, Enum):
     CALL = "CALL"
     IMPORT = "IMPORT"
     RETURN = "RETURN"
+    WHEN = "WHEN"
+    PARALLEL = "PARALLEL"
+    WITH = "WITH"
 
 
 @dataclass
@@ -34,6 +37,8 @@ class ASTNode:
     line: int = 0
     params: List[str] = field(default_factory=list)      # SUBROUTINE param names
     call_args: List[str] = field(default_factory=list)    # CALL arg expressions
+    event_key: str = ""                                   # WHEN trigger type
+    config: str = ""                                      # WHEN config string
 
     def to_dict(self) -> dict:
         d = {
@@ -47,6 +52,9 @@ class ASTNode:
             d["params"] = self.params
         if self.call_args:
             d["call_args"] = self.call_args
+        if self.event_key:
+            d["event_key"] = self.event_key
+            d["config"] = self.args
         return d
 
 
@@ -72,7 +80,8 @@ class DSLParser:
     """
 
     KEYWORDS = {"CLICK", "WAIT", "LOOP", "IF", "ELSE", "END", "RUN",
-                "SUBROUTINE", "CALL", "IMPORT", "RETURN"}
+                "SUBROUTINE", "CALL", "IMPORT", "RETURN", "WHEN",
+                "PARALLEL", "WITH"}
 
     def __init__(self):
         self._tokens: List[tuple[int, str, str]] = []
@@ -115,6 +124,7 @@ class DSLParser:
         return tok
 
     def _parse_block(self, end_triggers: set) -> List[ASTNode]:
+        """解析节点块直到遇到 end_triggers、END、ELSE 或 WITH"""
         nodes: List[ASTNode] = []
         while self._pos < len(self._tokens):
             tok = self._peek()
@@ -124,6 +134,8 @@ class DSLParser:
             if keyword in end_triggers or keyword == "END":
                 break
             if keyword == "ELSE":
+                break
+            if keyword == "WITH":
                 break
             self._consume()
 
@@ -178,6 +190,28 @@ class DSLParser:
             elif keyword == "RETURN":
                 nodes.append(ASTNode(NodeType.RETURN, args.strip(), line=lineno))
 
+            elif keyword == "WHEN":
+                event_key, config_str = self._parse_when_header(args, lineno)
+                node = ASTNode(NodeType.WHEN, config_str, line=lineno)
+                node.event_key = event_key
+                node.children = self._parse_block({"END"})
+                self._expect("END", lineno)
+                nodes.append(node)
+
+            elif keyword == "PARALLEL":
+                node = ASTNode(NodeType.PARALLEL, args, line=lineno)
+                # 第一个分支
+                branch = self._parse_block({"END", "WITH"})
+                node.children.append(ASTNode(NodeType.SEQUENCE, "branch_0", line=lineno, children=branch))
+                # 后续 WITH 分支
+                while self._peek() and self._peek()[1] == "WITH":
+                    self._consume()
+                    branch = self._parse_block({"END", "WITH"})
+                    idx = len(node.children)
+                    node.children.append(ASTNode(NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=branch))
+                self._expect("END", lineno)
+                nodes.append(node)
+
         return nodes
 
     def _expect(self, keyword: str, ref_line: int):
@@ -189,6 +223,15 @@ class DSLParser:
                 ref_line,
             )
         self._consume()
+
+    def _parse_when_header(self, text: str, lineno: int):
+        """WHEN FILE_CREATED "config" → ('FILE_CREATED', 'config')"""
+        parts = text.strip().split(None, 1)
+        if not parts:
+            raise DSLParseError("WHEN 需要事件类型，如: WHEN FILE_CREATED path", lineno)
+        event_key = parts[0]
+        config_str = parts[1].strip().strip('"').strip("'") if len(parts) > 1 else ""
+        return event_key, config_str
 
     # ── sub / call helpers ───────────────────────────────────────
     def _parse_sub_header(self, text: str, lineno: int):
