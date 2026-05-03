@@ -184,8 +184,10 @@ def test_dsl_parser_parallel_with():
   CLICK A
 WITH type
   CLICK B
+  END
 WITH ocr
   CLICK C
+  END
 END"""
     ast = DSLParser.from_string(dsl)
     parallels = [c for c in ast.children if c.type == NodeType.PARALLEL]

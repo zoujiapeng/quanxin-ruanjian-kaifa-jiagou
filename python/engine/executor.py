@@ -61,6 +61,7 @@ class DSLExecutor:
         self._stop_flag = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._action_handler = action_handler
+        self._ctx: Optional[ExecutionContext] = None  # 当前执行上下文引用
 
         # 层次化 DSL 支持
         self._subroutines: dict[str, ASTNode] = {}
@@ -99,8 +100,10 @@ class DSLExecutor:
         return None
 
     def _set_var(self, name: str, value: Any):
-        """设置变量（在当前作用域）"""
+        """设置变量（在当前作用域），同步到 ctx.variables 供 ActionHandler 访问"""
         self._current_scope()[name] = value
+        if self._ctx is not None:
+            self._ctx.variables[name] = value
 
     def _interpolate(self, text: str) -> str:
         """替换 {var} 为变量值"""
@@ -159,6 +162,7 @@ class DSLExecutor:
         self._pause_event.set()
         self._scope_stack = [dict(ctx.variables)]
         self._call_depth = 0
+        self._ctx = ctx
         self._set_state(ExecutorState.RUNNING)
 
     def _reset_state_no_run(self):
@@ -289,6 +293,24 @@ class DSLExecutor:
         elif node.type == NodeType.SCREENSTABLE:
             self._exec_screenstable(node, ctx)
 
+        elif node.type == NodeType.HOTKEY:
+            self._exec_hotkey(node, ctx)
+
+        elif node.type == NodeType.FOCUS:
+            self._exec_focus(node, ctx)
+
+        elif node.type == NodeType.SET:
+            self._exec_set(node, ctx)
+
+        elif node.type == NodeType.OCR_FIND:
+            self._exec_ocr_find(node, ctx)
+
+        elif node.type == NodeType.OCR_EXTRACT:
+            self._exec_ocr_extract(node, ctx)
+
+        elif node.type == NodeType.REGION_SELECT:
+            self._exec_region_select(node, ctx)
+
         # SUBROUTINE 定义直接跳过（已在 parser 注册）
 
     # ── 指令执行 ─────────────────────────────────────────────────
@@ -396,6 +418,68 @@ class DSLExecutor:
         result = self._call_action("wait_screen_stable", timeout=timeout, ctx=ctx)
         self._set_var("_screen_stable", result)
         self._emit("node_done", node_type="SCREENSTABLE", args=str(timeout), line=node.line)
+
+    def _exec_hotkey(self, node: ASTNode, ctx: ExecutionContext):
+        keys = [k.strip() for k in node.args.split(",")]
+        self._emit("node_start", node_type="HOTKEY", args=str(keys), line=node.line)
+        self._log(f"HOTKEY: {keys}")
+        self._call_action("hotkey", keys=keys, ctx=ctx)
+        self._emit("node_done", node_type="HOTKEY", args=str(keys), line=node.line)
+
+    def _exec_focus(self, node: ASTNode, ctx: ExecutionContext):
+        title = self._interpolate(node.args)
+        self._emit("node_start", node_type="FOCUS", args=title, line=node.line)
+        self._log(f"FOCUS: {title}")
+        self._call_action("focus_window", title=title, ctx=ctx)
+        self._emit("node_done", node_type="FOCUS", args=title, line=node.line)
+
+    def _exec_set(self, node: ASTNode, ctx: ExecutionContext):
+        """SET var_name value — 设置变量"""
+        parts = node.args.split(None, 1)
+        if len(parts) >= 1:
+            name = parts[0]
+            value = self._interpolate(parts[1]) if len(parts) > 1 else ""
+            self._set_var(name, value)
+            self._log(f"SET {name} = {value}")
+
+    def _exec_ocr_find(self, node: ASTNode, ctx: ExecutionContext):
+        query = self._interpolate(node.args)
+        self._emit("node_start", node_type="OCR_FIND", args=query, line=node.line)
+        self._log(f"OCR_FIND: {query}")
+        result = self._call_action("ocr_find", query=query, ctx=ctx)
+        if isinstance(result, dict):
+            self._set_var("_ocr_found", result.get("found", False))
+            self._set_var("_ocr_text", result.get("text", ""))
+            self._set_var("_ocr_x", result.get("center_x"))
+            self._set_var("_ocr_y", result.get("center_y"))
+            self._set_var("_ocr_confidence", result.get("confidence"))
+        self._emit("node_done", node_type="OCR_FIND", args=query, line=node.line)
+
+    def _exec_ocr_extract(self, node: ASTNode, ctx: ExecutionContext):
+        self._emit("node_start", node_type="OCR_EXTRACT", args="", line=node.line)
+        self._log("OCR_EXTRACT: 提取屏幕所有文字")
+        result = self._call_action("ocr_extract", ctx=ctx)
+        self._set_var("_ocr_texts", result)
+        self._emit("node_done", node_type="OCR_EXTRACT", args="", line=node.line)
+
+    def _exec_region_select(self, node: ASTNode, ctx: ExecutionContext):
+        """REGION_SELECT var_name [message] — 用户交互式框选区域"""
+        parts = node.args.split(None, 1)
+        var_name = parts[0] if parts else "_selected_region"
+        message = parts[1] if len(parts) > 1 else "请拖拽选择监控区域"
+        self._emit("node_start", node_type="REGION_SELECT", args=var_name, line=node.line)
+        self._log(f"REGION_SELECT: 请在屏幕框选区域 (变量={var_name})")
+        result = self._call_action("region_select", message=message, ctx=ctx)
+        if result:
+            region_str = f"{result[0]},{result[1]},{result[2]},{result[3]}"
+            self._set_var(var_name, region_str)
+            self._set_var("_selected_region", region_str)
+            self._log(f"  区域已选择: {region_str} → ${var_name}")
+        else:
+            self._set_var(var_name, "")
+            self._set_var("_selected_region", "")
+            self._log("  区域选择已取消")
+        self._emit("node_done", node_type="REGION_SELECT", args=var_name, line=node.line)
 
     # ── 层次化 DSL 执行 ──────────────────────────────────────────
     def _exec_call(self, node: ASTNode, ctx: ExecutionContext):

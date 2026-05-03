@@ -32,6 +32,12 @@ class NodeType(str, Enum):
     SCREENSHOT = "SCREENSHOT"
     WAITSCREEN = "WAITSCREEN"
     SCREENSTABLE = "SCREENSTABLE"
+    HOTKEY = "HOTKEY"
+    FOCUS = "FOCUS"
+    SET = "SET"
+    OCR_FIND = "OCR_FIND"
+    OCR_EXTRACT = "OCR_EXTRACT"
+    REGION_SELECT = "REGION_SELECT"
 
 
 @dataclass
@@ -88,7 +94,9 @@ class DSLParser:
     KEYWORDS = {"CLICK", "TYPE", "LAUNCH", "WAIT", "LOOP", "IF", "BREAK", "ELSE", "END", "RUN",
                 "SUBROUTINE", "CALL", "IMPORT", "RETURN", "WHEN",
                 "PARALLEL", "WITH",
-                "SCREENSHOT", "WAITSCREEN", "SCREENSTABLE"}
+                "SCREENSHOT", "WAITSCREEN", "SCREENSTABLE",
+                "HOTKEY", "FOCUS", "SET", "OCR_FIND", "OCR_EXTRACT",
+                "REGION_SELECT"}
 
     def __init__(self):
         self._tokens: List[tuple[int, str, str]] = []
@@ -165,6 +173,24 @@ class DSLParser:
             elif keyword == "SCREENSTABLE":
                 nodes.append(ASTNode(NodeType.SCREENSTABLE, args, line=lineno))
 
+            elif keyword == "HOTKEY":
+                nodes.append(ASTNode(NodeType.HOTKEY, args, line=lineno))
+
+            elif keyword == "FOCUS":
+                nodes.append(ASTNode(NodeType.FOCUS, args, line=lineno))
+
+            elif keyword == "SET":
+                nodes.append(ASTNode(NodeType.SET, args, line=lineno))
+
+            elif keyword == "OCR_FIND":
+                nodes.append(ASTNode(NodeType.OCR_FIND, args, line=lineno))
+
+            elif keyword == "OCR_EXTRACT":
+                nodes.append(ASTNode(NodeType.OCR_EXTRACT, args, line=lineno))
+
+            elif keyword == "REGION_SELECT":
+                nodes.append(ASTNode(NodeType.REGION_SELECT, args, line=lineno))
+
             elif keyword == "WAIT":
                 nodes.append(ASTNode(NodeType.WAIT, args, line=lineno))
 
@@ -236,7 +262,7 @@ class DSLParser:
         return nodes
 
     def _parse_parallel_branches(self, node: ASTNode, ref_line: int):
-        """解析 PARALLEL 分支：WITH 是分隔符，每段委托 _parse_block 解析"""
+        """解析 PARALLEL 分支：WITH 是分支容器（自包含，自己管自己的 END）"""
         while self._pos < len(self._tokens):
             tok = self._peek()
             if tok is None:
@@ -247,11 +273,18 @@ class DSLParser:
                 break
             if keyword == "WITH":
                 self._consume()
+                # WITH 是自包含分支：解析内容 + 自己的 END
+                children = self._parse_block({"END"})
+                self._expect("END", lineno)
+                idx = len(node.children)
+                node.children.append(ASTNode(
+                    NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=children))
                 continue
-            # 用 _parse_block 解析一个分支，遇到 END 或 WITH 时停止
+            # 非 WITH 分支，遇到 END 或 WITH 时停止
             children = self._parse_block({"END", "WITH"})
             idx = len(node.children)
-            node.children.append(ASTNode(NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=children))
+            node.children.append(ASTNode(
+                NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=children))
         if not node.children:
             raise DSLParseError("PARALLEL 块不能为空", ref_line)
 

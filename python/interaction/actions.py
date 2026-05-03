@@ -295,6 +295,11 @@ class ActionHandler:
             "screenshot": self._handle_screenshot,
             "wait_screen_change": self._handle_wait_screen_change,
             "wait_screen_stable": self._handle_wait_screen_stable,
+            "hotkey": self._handle_hotkey,
+            "focus_window": self._handle_focus_window,
+            "ocr_find": self._handle_ocr_find,
+            "ocr_extract": self._handle_ocr_extract,
+            "region_select": self._handle_region_select,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -340,17 +345,141 @@ class ActionHandler:
     def _handle_wait_screen_stable(self, timeout: float = 30.0, ctx=None, **_) -> bool:
         return self.detector.is_stable(duration=min(timeout, 2.0))
 
+    def _handle_hotkey(self, keys: list, ctx=None, **_) -> bool:
+        HumanKeyboard.hotkey(*keys)
+        return True
+
+    def _handle_focus_window(self, title: str, ctx=None, **_) -> bool:
+        """聚焦窗口（通过 win32gui）"""
+        try:
+            import win32gui, win32con
+            def cb(hwnd, ctx_ptr):
+                if win32gui.IsWindowVisible(hwnd):
+                    wtitle = win32gui.GetWindowText(hwnd)
+                    if title.lower() in wtitle.lower():
+                        ctx_ptr["found"] = hwnd
+            ptr = {"found": None}
+            win32gui.EnumWindows(cb, ptr)
+            if ptr["found"]:
+                win32gui.ShowWindow(ptr["found"], win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(ptr["found"])
+                time.sleep(0.3)
+                return True
+            return False
+        except ImportError:
+            return False
+
+    def _handle_ocr_find(self, query: str, region: str = "", ctx=None, **_) -> dict:
+        reg = self._parse_region(region) if region else None
+        result = self.ocr.find_text(query, region=reg)
+        if result:
+            x, y, w, h = result.bbox
+            return {"found": True, "text": result.text, "x": x, "y": y,
+                    "w": w, "h": h, "center_x": x + w // 2, "center_y": y + h // 2,
+                    "confidence": result.confidence}
+        return {"found": False}
+
+    def _handle_ocr_extract(self, region: str = "", ctx=None, **_) -> list:
+        reg = self._parse_region(region) if region else None
+        results = self.ocr.extract_all(reg)
+        return [{"text": r.text, "x": r.bbox[0], "y": r.bbox[1],
+                 "confidence": r.confidence} for r in results]
+
+    def _handle_region_select(self, message: str = "请拖拽选择监控区域", ctx=None, **_) -> tuple:
+        """用户交互式框选区域 — 返回 (x, y, w, h)"""
+        from interaction.region_picker import RegionPicker
+        region = RegionPicker.pick(message)
+        return region or (0, 0, 0, 0)
+
+    @staticmethod
+    def _parse_region(s: str):
+        """'x,y,w,h' → (x, y, w, h)"""
+        parts = s.split(",")
+        if len(parts) == 4:
+            return tuple(int(p.strip()) for p in parts)
+        return None
+
     def _handle_condition(self, condition: str, ctx=None, **_) -> bool:
         """执行条件判断"""
         # 颜色条件: COLOR H,S,V AT x,y,w,h [MIN_RATIO N]
         if condition.upper().startswith("COLOR "):
             return self._check_color_condition(condition)
-        # 进度条类条件
+        # 图像匹配: IMAGE template_name
+        if condition.upper().startswith("IMAGE "):
+            return self._check_image_condition(condition)
+        # 进度条: PROGRESS x,y,w,h > 0.5
+        if condition.upper().startswith("PROGRESS "):
+            return self._check_progress_condition(condition)
+        # 进度条类条件（中文/英文短语）
         if "低于" in condition or "less than" in condition.lower():
             return self._check_threshold(condition, ctx)
+        # 变量表达式: {var} > 5, {count} == 10
+        if "{" in condition and any(op in condition for op in (">", "<", "==", "!=", ">=", "<=")):
+            return self._check_expression(condition, ctx)
         region = ctx.variables.get("region") if ctx else None
         result = self.ocr.find_text(condition, region=region)
         return result is not None
+
+    def _check_image_condition(self, condition: str) -> bool:
+        """IMAGE template_name [AT x,y,w,h]"""
+        import re
+        m = re.match(r"IMAGE\s+(\w+)(?:\s+AT\s+([\d,]+))?", condition, re.IGNORECASE)
+        if not m:
+            return False
+        template = m.group(1)
+        region = None
+        if m.group(2):
+            parts = m.group(2).split(",")
+            if len(parts) == 4:
+                region = tuple(int(p.strip()) for p in parts)
+        match = self.matcher.find(template, region=region)
+        return match is not None
+
+    def _check_progress_condition(self, condition: str) -> bool:
+        """PROGRESS x,y,w,h > 0.5"""
+        import re
+        m = re.match(r"PROGRESS\s+([\d,]+)\s*(>|<|>=|<=|==|!=)\s*([\d.]+)", condition, re.IGNORECASE)
+        if not m:
+            return False
+        reg_parts = m.group(1).split(",")
+        if len(reg_parts) != 4:
+            return False
+        region = tuple(int(p.strip()) for p in reg_parts)
+        op = m.group(2)
+        threshold = float(m.group(3))
+        ratio = ColorDetector.detect_progress_bar(region)
+        if op == ">": return ratio > threshold
+        if op == "<": return ratio < threshold
+        if op == ">=": return ratio >= threshold
+        if op == "<=": return ratio <= threshold
+        if op == "==": return abs(ratio - threshold) < 0.01
+        if op == "!=": return abs(ratio - threshold) >= 0.01
+        return False
+
+    def _check_expression(self, condition: str, ctx) -> bool:
+        """变量表达式: {count} > 5"""
+        import re
+        m = re.match(r"\{(\w+)\}\s*(>|<|>=|<=|==|!=)\s*([\d.]+)", condition)
+        if not m:
+            return False
+        var_name = m.group(1)
+        # 从 ctx.variables 查找（executor 在 _set_var 时同步写入 ctx.variables）
+        var_val = ctx.variables.get(var_name) if ctx else None
+        if var_val is None:
+            return False
+        try:
+            val = float(var_val)
+        except (ValueError, TypeError):
+            return False
+        op = m.group(2)
+        threshold = float(m.group(3))
+        if op == ">": return val > threshold
+        if op == "<": return val < threshold
+        if op == ">=": return val >= threshold
+        if op == "<=": return val <= threshold
+        if op == "==": return abs(val - threshold) < 0.01
+        if op == "!=": return abs(val - threshold) >= 0.01
+        return False
 
     def _check_color_condition(self, condition: str) -> bool:
         """COLOR H,S,V AT x,y,w,h [MIN_RATIO N]"""
