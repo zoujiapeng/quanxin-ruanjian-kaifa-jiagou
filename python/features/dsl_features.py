@@ -15,7 +15,7 @@ from features.registry import feature, P, TC, FeatureCategory as F
 @feature(
     name="run_dsl",
     display_name="执行 DSL",
-    description="【免 token 执行】执行 Lobster DSL 脚本。CLI/MCP 生成 DSL 后调用此功能在本地引擎运行，LOOP/WAIT/IF 等控制流不消耗 Claude API token。返回执行日志。适用于：已生成完整 DSL 需要执行的场景。搭配：ai_generate_dsl（生成 DSL）、dsl_to_graph（可视化）",
+    description="【免 token 执行】执行 Lobster DSL 脚本。在本地引擎运行 LOOP/WAIT/IF 等控制流不消耗 Claude API token。适用于：已生成完整 DSL 后执行",
     category=F.CONTROL,
     params=[
         P("dsl", "str", "DSL 脚本内容，多行文本", example="CLICK 开始\nWAIT 2\nCLICK 确认"),
@@ -42,7 +42,7 @@ def run_dsl(dsl: str, task_id: str = "", max_loops: int = 100, timeout: float = 
 @feature(
     name="run_dsl_sync",
     display_name="同步执行 DSL",
-    description="【免 token 执行】同步执行 DSL 并等待完成。与 run_dsl 区别：阻塞直到执行完毕返回所有日志。适用于：短流程、需要获取完整执行结果的场景。搭配：run_dsl（异步长流程）",
+    description="【免 token 执行】同步执行 DSL 并阻塞等待执行完毕返回完整日志。适用于短流程或需要获取完整执行结果的场景",
     category=F.CONTROL,
     params=[
         P("dsl", "str", "DSL 脚本内容", example="CLICK 开始\nWAIT 完成"),

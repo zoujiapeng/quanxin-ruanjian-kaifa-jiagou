@@ -11,7 +11,7 @@ from features._utils import parse_region, resolve_coord, sim_delay
 @feature(
     name="click_target",
     display_name="点击目标",
-    description="【核心操作】语义点击：自动融合 OCR文字 + 图像模板 + 坐标三种策略定位目标并点击，带重试和回退。使用场景：点击按钮/链接/图标。组合：先 ocr_find_text 确认目标位置 → click_target 点击 → WAIT 等待反馈 → 再次 ocr_find_text 或 color_check 验证结果。可用 LOOP 包裹实现循环点击直到条件满足",
+    description="【核心操作】语义点击：自动融合 OCR 文字 + 图像模板 + 坐标三种策略定位目标并点击。适用于任何需要点击屏幕元素的场景",
     category=F.ACTION,
     params=[
         P("target", "str", "目标：文字内容 / 图像模板名 / 'x,y' 坐标", example="确认按钮"),
@@ -44,7 +44,7 @@ def click_target(target: str, region: str = "", timeout: float = 10,
 @feature(
     name="type_text",
     display_name="输入文字",
-    description="【键盘输入】模拟键盘输入文字，支持人类速度模拟（随机按键间隔）。使用场景：填写表单、输入搜索关键词、输入文本内容。组合：先 click_target 聚焦输入框 → type_text 输入 → HOTKEY ctrl+enter 提交。注意中文输入法问题：中文文本建议用 type_clipboard 替代",
+    description="【键盘输入】模拟键盘输入文字，支持人类速度模拟（随机按键间隔）。适用于填写表单、输入搜索关键词。中文文本建议用 type_clipboard 替代（绕过输入法）",
     category=F.ACTION,
     params=[
         P("text", "str", "要输入的文字", example="Hello World"),
@@ -76,7 +76,7 @@ def type_text(text: str, clear_first: bool = False, interval: float = 0) -> bool
 @feature(
     name="scroll",
     display_name="滚动页面",
-    description="【滚轮】在指定位置或区域滚动鼠标滚轮。使用场景：滚动页面浏览内容、切换到下一页结果。组合：scroll 翻页 → ocr_find_text 查找目标 → click_target 点击。可用 LOOP 包裹实现持续翻页直到找到目标",
+    description="【滚轮】在指定位置或区域滚动鼠标滚轮，支持方向（上/下/左/右）和滚动量。适用于翻页、滚动到页面特定位置",
     category=F.ACTION,
     params=[
         P("direction", "str", "方向: up | down | left | right", example="down"),
@@ -108,7 +108,7 @@ def scroll(direction: str, amount: int = 3, x: int = -1, y: int = -1) -> bool:
 @feature(
     name="drag",
     display_name="拖拽",
-    description="【拖拽】从一个位置拖拽到另一个位置，支持文字/坐标定位。使用场景：拖拽文件到文件夹、拖动滑块、调整窗口大小。组合：find_image 定位模板 → drag 拖动到目标位置",
+    description="【拖拽】从一个位置拖拽到另一个位置，支持文字/坐标定位。适用于拖拽文件、滑动条、调整窗口布局",
     category=F.ACTION,
     params=[
         P("from_target", "str", "起始目标（文字或坐标）", example="文件图标"),
@@ -134,7 +134,7 @@ def drag(from_target: str, to_target: str, duration: float = 0.5) -> bool:
 @feature(
     name="hotkey",
     display_name="快捷键",
-    description="【快捷键】按下快捷键组合。使用场景：系统级操作（ctrl+c复制、alt+tab切换窗口、ctrl+shift+esc任务管理器）、应用内快捷键。组合：type_text/type_clipboard 输入内容 → HOTKEY ctrl+s 保存。注意事项：组合键用 + 连接，如 ctrl+shift+a",
+    description="【快捷键】按下快捷键组合，如 ctrl+c、alt+F4。适用于系统级操作、应用内快捷指令。组合键用 + 连接",
     category=F.ACTION,
     params=[
         P("keys", "str", "快捷键，用+连接，如 ctrl+c", example="ctrl+c"),
@@ -160,7 +160,7 @@ def hotkey(keys: str) -> bool:
 @feature(
     name="type_clipboard",
     display_name="剪贴板输入",
-    description="【推荐中文输入】通过剪贴板粘贴文字（解决中文输入法问题），保留原剪贴板内容。使用场景：输入中文/特殊字符（推荐用于所有东亚语言文字输入）、输入长文本。组合：click_target 聚焦 → type_clipboard 粘贴 → HOTKEY enter 确认。对比 type_text：此工具绕过输入法，更可靠",
+    description="【推荐中文输入】通过剪贴板粘贴文字，绕过输入法直接输入中文/特殊字符，保留原剪贴板内容。推荐所有东亚语言输入使用此工具而非 type_text",
     category=F.ACTION,
     params=[
         P("text", "str", "要输入的文字", example="你好世界"),
