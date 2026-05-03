@@ -56,9 +56,15 @@ def timer_wait_file(path: str, timeout: float = 60, wait_delete: bool = False) -
     tags=["timer", "control"],
 )
 def timer_wait_process(name: str, timeout: float = 60, wait_exit: bool = False) -> dict:
+    try:
+        import psutil
+        _HAS_PSUTIL = True
+    except ImportError:
+        _HAS_PSUTIL = False
+
     def process_running():
-        try:
-            import psutil
+        nonlocal _HAS_PSUTIL
+        if _HAS_PSUTIL:
             for proc in psutil.process_iter(["name"]):
                 try:
                     if proc.info["name"] and name.lower() in proc.info["name"].lower():
@@ -66,8 +72,7 @@ def timer_wait_process(name: str, timeout: float = 60, wait_exit: bool = False) 
                 except Exception:
                     pass
             return False
-        except ImportError:
-            # fallback: tasklist
+        else:
             import subprocess
             try:
                 output = subprocess.check_output(

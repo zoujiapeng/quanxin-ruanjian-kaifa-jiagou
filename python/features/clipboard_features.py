@@ -13,7 +13,7 @@ from features.registry import feature, P, TC, FeatureCategory as F
     description="【剪贴板】读取当前剪贴板中的文本内容。用于捕获复制的内容",
     category=F.SYSTEM,
     params=[],
-    returns="str - 剪贴板文本",
+    returns="dict{success, result: str} - 剪贴板文本",
     tags=["clipboard"],
 )
 def clipboard_get_text() -> dict:
@@ -101,7 +101,7 @@ def clipboard_get_image(format_: str = "base64", save_path: str = "") -> dict:
     description="【剪贴板】读取剪贴板中的文件路径列表。用于获取用户复制的文件信息",
     category=F.SYSTEM,
     params=[],
-    returns="list[str] - 文件路径列表",
+    returns="dict{success, result: list[str]} - 文件路径列表",
     tags=["clipboard"],
 )
 def clipboard_get_files() -> dict:
@@ -128,7 +128,7 @@ def clipboard_get_files() -> dict:
     description="【剪贴板】清空系统剪贴板内容。用于清除敏感信息或准备新内容",
     category=F.SYSTEM,
     params=[],
-    returns="bool - 是否成功",
+    returns="dict{success, result: bool} - 是否成功",
     tags=["clipboard"],
 )
 def clipboard_clear() -> dict:

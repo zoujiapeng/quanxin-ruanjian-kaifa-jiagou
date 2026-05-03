@@ -117,8 +117,11 @@ class DSLExecutor:
         """解析并异步执行 DSL"""
         if self._state == ExecutorState.RUNNING:
             raise ExecutionError("执行器已在运行中")
-        parser = DSLParser()
-        ast = parser.parse(source)
+        try:
+            parser = DSLParser()
+            ast = parser.parse(source)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
         self._subroutines = parser.subroutines
         ctx = ctx or ExecutionContext()
         self._reset_state(ctx)
@@ -126,17 +129,26 @@ class DSLExecutor:
             target=self._run_thread, args=(ast, ctx), daemon=True
         )
         self._thread.start()
+        return {"success": True, "state": self._state.value, "thread": True}
 
     def run_dsl_sync(self, source: str, ctx: Optional[ExecutionContext] = None):
-        """同步执行 DSL（阻塞）"""
-        parser = DSLParser()
-        ast = parser.parse(source)
+        """同步执行 DSL（阻塞），返回结果 dict"""
+        try:
+            parser = DSLParser()
+            ast = parser.parse(source)
+        except Exception as e:
+            return {"success": False, "error": f"DSL 解析失败: {e}"}
         self._subroutines = parser.subroutines
         ctx = ctx or ExecutionContext()
         self._reset_state(ctx)
-        self._execute_node(ast, ctx)
-        if not self._stop_flag.is_set():
-            self._set_state(ExecutorState.FINISHED)
+        try:
+            self._execute_node(ast, ctx)
+            if not self._stop_flag.is_set():
+                self._set_state(ExecutorState.FINISHED)
+            return {"success": True, "state": self._state.value}
+        except Exception as e:
+            self._set_state(ExecutorState.ERROR)
+            return {"success": False, "error": str(e)}
 
     def _reset_state(self, ctx: ExecutionContext):
         self._stop_flag.clear()
@@ -149,16 +161,19 @@ class DSLExecutor:
         if self._state == ExecutorState.RUNNING:
             self._pause_event.clear()
             self._set_state(ExecutorState.PAUSED)
+        return self._state.value
 
     def resume(self):
         if self._state == ExecutorState.PAUSED:
             self._pause_event.set()
             self._set_state(ExecutorState.RUNNING)
+        return self._state.value
 
     def stop(self):
         self._stop_flag.set()
         self._pause_event.set()
         self._set_state(ExecutorState.STOPPED)
+        return self._state.value
 
     @property
     def state(self) -> ExecutorState:
@@ -208,6 +223,9 @@ class DSLExecutor:
         elif node.type == NodeType.CLICK:
             self._exec_click(node, ctx)
 
+        elif node.type == NodeType.TYPE:
+            self._exec_type(node, ctx)
+
         elif node.type == NodeType.WAIT:
             self._exec_wait(node, ctx)
 
@@ -248,10 +266,25 @@ class DSLExecutor:
         self._call_action("click", target=target, ctx=ctx)
         self._emit("node_done", node_type="CLICK", args=target, line=node.line)
 
+    def _exec_type(self, node: ASTNode, ctx: ExecutionContext):
+        text = self._interpolate(node.args)
+        self._emit("node_start", node_type="TYPE", args=text, line=node.line)
+        self._log(f"TYPE: {text}")
+        self._call_action("type", text=text, ctx=ctx)
+        self._emit("node_done", node_type="TYPE", args=text, line=node.line)
+
     def _exec_wait(self, node: ASTNode, ctx: ExecutionContext):
         condition = self._interpolate(node.args)
         self._emit("node_start", node_type="WAIT", args=condition, line=node.line)
         self._log(f"WAIT: {condition}")
+        # 数字条件 => 实际 sleep（无论有无 handler）
+        try:
+            seconds = float(condition)
+            time.sleep(seconds)
+            self._emit("node_done", node_type="WAIT", args=condition, line=node.line)
+            return
+        except ValueError:
+            pass
         self._call_action("wait", condition=condition, timeout=ctx.timeout, ctx=ctx)
         self._emit("node_done", node_type="WAIT", args=condition, line=node.line)
 

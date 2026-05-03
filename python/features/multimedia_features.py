@@ -130,6 +130,7 @@ def screen_record_start(output: str, region: str = "", fps: int = 10, include_au
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(output, fourcc, fps, (w, h))
         if not writer.isOpened():
+            writer.release()
             return {"success": False, "error": "无法创建视频文件"}
 
         _recorder["active"] = True

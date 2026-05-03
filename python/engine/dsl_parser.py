@@ -13,6 +13,7 @@ from enum import Enum
 
 class NodeType(str, Enum):
     CLICK = "CLICK"
+    TYPE = "TYPE"
     WAIT = "WAIT"
     LOOP = "LOOP"
     IF = "IF"
@@ -79,7 +80,7 @@ class DSLParser:
       RETURN [value]
     """
 
-    KEYWORDS = {"CLICK", "WAIT", "LOOP", "IF", "ELSE", "END", "RUN",
+    KEYWORDS = {"CLICK", "TYPE", "WAIT", "LOOP", "IF", "ELSE", "END", "RUN",
                 "SUBROUTINE", "CALL", "IMPORT", "RETURN", "WHEN",
                 "PARALLEL", "WITH"}
 
@@ -139,6 +140,9 @@ class DSLParser:
 
             if keyword == "CLICK":
                 nodes.append(ASTNode(NodeType.CLICK, args, line=lineno))
+
+            elif keyword == "TYPE":
+                nodes.append(ASTNode(NodeType.TYPE, args, line=lineno))
 
             elif keyword == "WAIT":
                 nodes.append(ASTNode(NodeType.WAIT, args, line=lineno))
@@ -211,56 +215,22 @@ class DSLParser:
         return nodes
 
     def _parse_parallel_branches(self, node: ASTNode, ref_line: int):
-        """解析 PARALLEL 分支：WITH 是分支分隔符，每段是一个 SEQUENCE"""
-        current_branch = []
+        """解析 PARALLEL 分支：WITH 是分隔符，每段委托 _parse_block 解析"""
         while self._pos < len(self._tokens):
             tok = self._peek()
             if tok is None:
                 break
-            lineno, keyword, args = tok
+            lineno, keyword, _ = tok
             if keyword == "END":
                 self._consume()
                 break
             if keyword == "WITH":
                 self._consume()
-                if current_branch:
-                    idx = len(node.children)
-                    node.children.append(ASTNode(NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=current_branch))
-                    current_branch = []
                 continue
-            # 解析单条语句
-            self._consume()
-            if keyword == "CLICK":
-                current_branch.append(ASTNode(NodeType.CLICK, args, line=lineno))
-            elif keyword == "WAIT":
-                current_branch.append(ASTNode(NodeType.WAIT, args, line=lineno))
-            elif keyword == "RUN":
-                current_branch.append(ASTNode(NodeType.RUN, args, line=lineno))
-            elif keyword == "LOOP":
-                child = ASTNode(NodeType.LOOP, args, line=lineno)
-                child.children = self._parse_block({"END"})
-                self._expect("END", lineno)
-                current_branch.append(child)
-            elif keyword == "IF":
-                child = ASTNode(NodeType.IF, args, line=lineno)
-                child.children = self._parse_block({"END", "ELSE"})
-                nxt = self._peek()
-                if nxt and nxt[1] == "ELSE":
-                    self._consume()
-                    child.else_children = self._parse_block({"END"})
-                self._expect("END", lineno)
-                current_branch.append(child)
-            elif keyword == "CALL":
-                name, call_args = self._parse_call_expr(args, lineno)
-                child = ASTNode(NodeType.CALL, name, line=lineno)
-                child.call_args = call_args
-                current_branch.append(child)
-            else:
-                raise DSLParseError(f"PARALLEL 中不支持 '{keyword}'", lineno)
-        # 保存最后一个分支
-        if current_branch:
+            # 用 _parse_block 解析一个分支，遇到 END 或 WITH 时停止
+            children = self._parse_block({"END", "WITH"})
             idx = len(node.children)
-            node.children.append(ASTNode(NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=current_branch))
+            node.children.append(ASTNode(NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=children))
         if not node.children:
             raise DSLParseError("PARALLEL 块不能为空", ref_line)
 

@@ -14,28 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # 导入所有功能模块（触发注册）
-import features.action_features      # noqa
-import features.perception_features  # noqa
-import features.ai_debug_features    # noqa
-import features.system_features      # noqa
-import features.dsl_features         # noqa
-import features.browser_features     # noqa
-import features.input_features       # noqa
-import features.window_features      # noqa
-import features.system_control_features  # noqa
-import features.clipboard_features   # noqa
-import features.network_features     # noqa
-import features.timer_features       # noqa
-import features.filedialog_features  # noqa
-import features.a11y_features        # noqa
-import features.macro_features       # noqa
-import features.multimedia_features  # noqa
-import features.fusion_features      # noqa
-import features.persistence_features # noqa
-import features.healing_features     # noqa
-import features.trigger_features     # noqa
-import features.ai_plan_features     # noqa
-import features.plugin_features      # noqa
+import features._all  # noqa
 
 from features.registry import registry
 from engine.dsl_parser import DSLParser

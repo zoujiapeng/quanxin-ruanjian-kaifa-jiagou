@@ -264,7 +264,35 @@ def _watch_file_created(config: dict, stop: threading.Event) -> bool:
     return False
 
 
-def _watch_process_start(config: dict, stop: threading.Event) -> bool:
+def _watch_process_exit(config: dict, stop: threading.Event) -> bool:
+    """监控进程退出（进程存在时轮询，消失时触发）"""
+    name = config.get("name", "").lower()
+    poll = config.get("interval", 0.5)
+    try:
+        import psutil
+        while not stop.is_set():
+            found = False
+            for proc in psutil.process_iter(["name"]):
+                try:
+                    if proc.info["name"] and proc.info["name"].lower() == name:
+                        found = True
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            if not found:
+                return True
+            time.sleep(poll)
+    except ImportError:
+        import subprocess
+        while not stop.is_set():
+            try:
+                out = subprocess.check_output(f"tasklist /fi \"IMAGENAME eq {name}\"", shell=True, text=True)
+                if name not in out or "No tasks" in out:
+                    return True
+            except Exception:
+                return True
+            time.sleep(poll)
+    return False
     """监控进程启动"""
     name = config.get("name", "").lower()
     poll = config.get("interval", 0.5)
@@ -357,7 +385,7 @@ _WATCHER_FUNCTIONS = {
     "file_created": _watch_file_created,
     "file_deleted": lambda c, s: _watch_file_created({**c, "wait_delete": True}, s),  # simplified
     "process_start": _watch_process_start,
-    "process_exit": _watch_process_start,  # 简化版
+    "process_exit": _watch_process_exit,
     "window_open": _watch_window_open,
     "clipboard_change": _watch_clipboard,
     "network_available": _watch_network,
@@ -383,6 +411,15 @@ def _reg_file_created(): pass
             ("interval", "number", "轮询间隔秒数")],
 )
 def _reg_process_start(): pass
+
+@trigger_type(
+    name="process_exit", display_name="进程退出",
+    description="监控指定名称的进程退出",
+    category=TriggerCategory.PROCESS, event_key="PROCESS_EXIT",
+    params=[("name", "string", "进程名称，如 chrome.exe"),
+            ("interval", "number", "轮询间隔秒数")],
+)
+def _reg_process_exit(): pass
 
 @trigger_type(
     name="window_open", display_name="窗口打开",

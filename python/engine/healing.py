@@ -3,6 +3,7 @@
 OCR 刷新 → a11y 替代 → 坐标偏移 → 上报
 """
 from __future__ import annotations
+import math
 import time
 import random
 import traceback
@@ -164,20 +165,29 @@ class HealingPipeline:
         return None
 
     def _strategy_offset(self, context: dict) -> Any:
-        """策略 3: 坐标偏移试探"""
+        """策略 3: 坐标偏移试探 — 8方向 × 4半径共32点逐个尝试"""
         target = context.get("target", "")
+        action = context.get("action", "click")
         try:
             from perception.fusion import get_fusion_engine
             engine = get_fusion_engine()
             result = engine.find_element(target)
             if result.found:
                 base_x, base_y = result.center_x, result.center_y
-                # 在目标周围画圆试探
                 for radius in [10, 20, 30, 50]:
                     for angle in range(0, 360, 45):
-                        ox = int(base_x + radius * __import__("math").cos(__import__("math").radians(angle)))
-                        oy = int(base_y + radius * __import__("math").sin(__import__("math").radians(angle)))
-                        return {"x": ox, "y": oy, "strategy": "offset", "radius": radius}
+                        ox = int(base_x + radius * math.cos(math.radians(angle)))
+                        oy = int(base_y + radius * math.sin(math.radians(angle)))
+                        # 有 handler 时逐个尝试，成功即返回
+                        if self._action_handler:
+                            try:
+                                hr = self._action_handler(action, target=target, x=ox, y=oy)
+                                if hr:
+                                    return {"x": ox, "y": oy, "strategy": "offset", "radius": radius}
+                            except Exception:
+                                continue
+                        else:
+                            return {"x": ox, "y": oy, "strategy": "offset", "radius": radius}
         except Exception:
             pass
         return None

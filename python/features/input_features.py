@@ -22,7 +22,7 @@ def _find_target_coords(target: str, region: str = "") -> tuple:
     try:
         from features.perception_features import ocr_find_text
         reg = parse_region(region)
-        ocr_result = ocr_find_text(query=target, region=region, fuzzy=True)
+        ocr_result = ocr_find_text(query=target, region=region, fuzzy_threshold=0.7)
         if isinstance(ocr_result, dict) and ocr_result.get("success"):
             boxes = ocr_result.get("result", [])
             if boxes:

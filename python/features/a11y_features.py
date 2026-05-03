@@ -64,10 +64,14 @@ def _walk_tree(element, depth: int, max_depth: int, filter_visible: bool) -> dic
 
         if depth < max_depth:
             try:
-                child = element.FindFirst(
-                    __import__("win32com.client").constants.TreeScope_Children,  # noqa
-                    __import__("win32com.client").gencache.EnsureDispatch("IASimpleProvider").CreatePropertyCondition(0, "")
-                )
+                from win32com.client import Dispatch
+                uia = Dispatch("UIAutomation.Core.UIAutomation", dynamic=True)
+                condition = uia.CreateTrueCondition()
+                children = element.FindAll(0, condition)  # TreeScope_Children
+                for child in children:
+                    child_node = _walk_tree(child, depth + 1, max_depth, filter_visible)
+                    if child_node:
+                        node["children"].append(child_node)
             except Exception:
                 pass
 
