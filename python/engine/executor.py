@@ -244,6 +244,9 @@ class DSLExecutor:
         elif node.type == NodeType.TYPE:
             self._exec_type(node, ctx)
 
+        elif node.type == NodeType.LAUNCH:
+            self._exec_launch(node, ctx)
+
         elif node.type == NodeType.WAIT:
             self._exec_wait(node, ctx)
 
@@ -291,6 +294,13 @@ class DSLExecutor:
         self._call_action("type", text=text, ctx=ctx)
         self._emit("node_done", node_type="TYPE", args=text, line=node.line)
 
+    def _exec_launch(self, node: ASTNode, ctx: ExecutionContext):
+        target = self._interpolate(node.args)
+        self._emit("node_start", node_type="LAUNCH", args=target, line=node.line)
+        self._log(f"LAUNCH: {target}")
+        self._call_action("launch", target=target, ctx=ctx)
+        self._emit("node_done", node_type="LAUNCH", args=target, line=node.line)
+
     def _exec_wait(self, node: ASTNode, ctx: ExecutionContext):
         condition = self._interpolate(node.args)
         self._emit("node_start", node_type="WAIT", args=condition, line=node.line)
@@ -307,15 +317,22 @@ class DSLExecutor:
         self._emit("node_done", node_type="WAIT", args=condition, line=node.line)
 
     def _exec_loop(self, node: ASTNode, ctx: ExecutionContext):
-        tag = node.args or "_default"
+        raw = node.args or ""
+        tag = raw
+        # 如果 LOOP 参数是纯数字，当作循环次数；否则当作标签名
+        try:
+            max_iter = int(raw)
+            tag = f"_loop_{raw}"
+        except ValueError:
+            max_iter = ctx.max_loops
         ctx.loop_count[tag] = 0
         self._emit("node_start", node_type="LOOP", args=node.args, line=node.line)
-        self._log(f"LOOP 开始: {tag}")
+        self._log(f"LOOP 开始: {raw} ({max_iter}次)")
 
-        while ctx.loop_count[tag] < ctx.max_loops:
+        while ctx.loop_count[tag] < max_iter:
             self._check_control()
             ctx.loop_count[tag] += 1
-            self._log(f"  LOOP [{tag}] 第 {ctx.loop_count[tag]} 次")
+            self._log(f"  LOOP [{raw}] 第 {ctx.loop_count[tag]} 次")
             try:
                 for child in node.children:
                     self._execute_node(child, ctx)

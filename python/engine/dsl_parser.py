@@ -14,6 +14,7 @@ from enum import Enum
 class NodeType(str, Enum):
     CLICK = "CLICK"
     TYPE = "TYPE"
+    LAUNCH = "LAUNCH"
     WAIT = "WAIT"
     LOOP = "LOOP"
     IF = "IF"
@@ -80,7 +81,7 @@ class DSLParser:
       RETURN [value]
     """
 
-    KEYWORDS = {"CLICK", "TYPE", "WAIT", "LOOP", "IF", "ELSE", "END", "RUN",
+    KEYWORDS = {"CLICK", "TYPE", "LAUNCH", "WAIT", "LOOP", "IF", "ELSE", "END", "RUN",
                 "SUBROUTINE", "CALL", "IMPORT", "RETURN", "WHEN",
                 "PARALLEL", "WITH"}
 
@@ -143,6 +144,9 @@ class DSLParser:
 
             elif keyword == "TYPE":
                 nodes.append(ASTNode(NodeType.TYPE, args, line=lineno))
+
+            elif keyword == "LAUNCH":
+                nodes.append(ASTNode(NodeType.LAUNCH, args, line=lineno))
 
             elif keyword == "WAIT":
                 nodes.append(ASTNode(NodeType.WAIT, args, line=lineno))

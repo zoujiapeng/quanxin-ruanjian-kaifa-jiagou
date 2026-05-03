@@ -99,3 +99,63 @@ def get_active_window() -> dict:
         return result or {"error": "无法获取窗口信息"}
     except ImportError:
         return {"error": "窗口管理模块不可用"}
+
+
+@feature(
+    name="launch_program",
+    display_name="启动程序",
+    description="【系统·启动】启动可执行程序或打开文件/URL。支持 exe、文档、网址。用 subprocess 或 os.startfile",
+    category=F.SYSTEM,
+    params=[
+        P("target", "str", "程序路径、文件名（如 notepad.exe）、文档或 URL", example="notepad.exe"),
+        P("args", "str", "命令行参数（可选）", required=False, default=""),
+        P("wait", "boolean", "是否等待程序退出", required=False, default=False),
+    ],
+    returns="dict{success, pid} - 启动结果",
+    tags=["system", "process", "launch"],
+)
+def launch_program(target: str, args: str = "", wait: bool = False) -> dict:
+    try:
+        import subprocess, os
+        full_args = [target] + (args.split() if args else [])
+        # 如果目标看起来像文件/目录/URL，用 os.startfile
+        if not any(target.lower().endswith(ext) for ext in (".exe", ".com", ".bat", ".cmd", ".msi")):
+            os.startfile(target)
+            return {"success": True, "pid": None}
+        proc = subprocess.Popen(full_args, shell=False)
+        if wait:
+            proc.wait()
+        return {"success": True, "pid": proc.pid}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@feature(
+    name="run_command",
+    display_name="运行命令",
+    description="【系统·命令】运行 shell 命令并捕获输出。用于执行系统命令、脚本和自动化操作",
+    category=F.SYSTEM,
+    params=[
+        P("command", "str", "要执行的命令", example="echo hello"),
+        P("timeout", "number", "超时秒数", required=False, default=30),
+    ],
+    returns="dict{success, stdout, stderr, returncode}",
+    tags=["system", "shell", "command"],
+)
+def run_command(command: str, timeout: float = 30) -> dict:
+    try:
+        import subprocess
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True,
+            timeout=timeout,
+        )
+        return {
+            "success": result.returncode == 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": f"命令超时 ({timeout}s)", "stdout": "", "stderr": ""}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

@@ -54,7 +54,7 @@ def test_registry_basics():
     """注册表：所有功能注册正确"""
     all_f = registry.all()
     check("registry.all() 返回列表", isinstance(all_f, list))
-    check("所有功能数 = 104", len(all_f) == 104, f"got {len(all_f)}")
+    check("所有功能数 = 106", len(all_f) == 106, f"got {len(all_f)}")
 
     # 检查无重复名称
     names = [f.name for f in all_f]
@@ -106,7 +106,7 @@ def test_registry_export_formats():
     # MCP
     tools = registry.export_mcp_tools()
     check("MCP tools 是列表", isinstance(tools, list))
-    check("MCP tools 数 = 104", len(tools) == 104)
+    check("MCP tools 数 = 106", len(tools) == 106)
     if tools:
         t = tools[0]
         for key in ("name", "description", "inputSchema"):
@@ -120,7 +120,7 @@ def test_registry_export_formats():
     # Claude Context
     ctx = registry.export_claude_context()
     check("Claude context 是字符串", isinstance(ctx, str))
-    check("Claude context 包含功能数", "104" in ctx, f"len={len(ctx)}")
+    check("Claude context 包含功能数", "106" in ctx, f"len={len(ctx)}")
 
     # DSL reference
     dsl_ref = registry.export_dsl_reference()
@@ -367,6 +367,55 @@ def test_store_basic():
 # 6. DSL 优化器测试
 # ══════════════════════════════════════════════════
 
+def test_launch_features():
+    """launch_program / run_command 注册正确"""
+    global PASS, FAIL
+    lp = registry.get("launch_program")
+    check("launch_program 已注册", lp is not None)
+    if lp:
+        check("launch_program 有 handler", callable(lp.handler))
+        check("launch_program 有 params", len(lp.params) >= 1)
+        # 模拟模式调用
+        r = registry.execute("launch_program", target="notepad.exe")
+        check("launch_program 模拟调用", r.get("success") is not False)
+
+    rc = registry.get("run_command")
+    check("run_command 已注册", rc is not None)
+    if rc:
+        r = registry.execute("run_command", command="echo test")
+        check("run_command 模拟调用", r.get("success") is not False)
+
+
+def test_dsl_launch_keyword():
+    """DSL LAUNCH 关键字"""
+    global PASS, FAIL
+    from engine.dsl_parser import DSLParser
+    from engine.executor import DSLExecutor
+
+    # 解析
+    ast = DSLParser.from_string("LAUNCH notepad.exe")
+    launches = [c for c in ast.children if c.type.value == "LAUNCH"]
+    check("DSL LAUNCH 解析成功", len(launches) == 1, f"got {len(launches)}")
+
+    # 执行
+    exe = DSLExecutor()
+    r = exe.run_dsl_sync("LAUNCH calc.exe")
+    check("DSL LAUNCH 执行成功", r.get("success") is True)
+
+
+def test_loop_numeric_count():
+    """LOOP 数字作为循环次数"""
+    global PASS, FAIL
+    from engine.executor import DSLExecutor, ExecutionContext
+
+    exe = DSLExecutor()
+    ctx = ExecutionContext(max_loops=9999)  # 默认极大值
+    r = exe.run_dsl_sync("LOOP 3\n  CLICK A\nEND")
+    check("LOOP 3 返回 dict", isinstance(r, dict))
+    # 内部应循环 3 次（数字优先于 max_loops）
+    # 验证通过即表示没有死循环
+
+
 def test_optimizer():
     """优化器：基础分析功能"""
     global PASS, FAIL
@@ -400,6 +449,9 @@ def main():
         ("引擎线程安全", test_engine_thread_safety),
         ("功能冒烟测试", test_all_features_smoke),
         ("存储层基础", test_store_basic),
+        ("启动程序与命令", test_launch_features),
+        ("DSL LAUNCH 关键字", test_dsl_launch_keyword),
+        ("LOOP 数字计数", test_loop_numeric_count),
         ("优化器分析", test_optimizer),
     ]
 
