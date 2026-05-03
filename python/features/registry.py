@@ -161,12 +161,13 @@ class FeatureRegistry:
                 return f
         return None
 
-    def execute(self, name: str, **kwargs) -> dict:
-        spec = self.get(name)
+    def execute(self, feature_name: str, **kwargs) -> dict:
+        """执行功能。第一个参数用 feature_name 避免和功能参数名冲突。"""
+        spec = self.get(feature_name)
         if spec is None:
-            return {"success": False, "error": f"未知功能: {name}", "feature": name}
+            return {"success": False, "error": f"未知功能: {feature_name}", "feature": feature_name}
         if spec.deprecated:
-            return {"success": False, "error": f"功能 '{name}' 已废弃", "feature": name}
+            return {"success": False, "error": f"功能 '{feature_name}' 已废弃", "feature": feature_name}
 
         start = time.time()
         try:
@@ -177,32 +178,32 @@ class FeatureRegistry:
             return {
                 "success": True,
                 "result": result,
-                "feature": name,
+                "feature": feature_name,
                 "elapsed_ms": round((time.time() - start) * 1000, 1),
             }
         except TypeError as e:
-            return {"success": False, "error": f"参数错误: {e}", "feature": name}
+            return {"success": False, "error": f"参数错误: {e}", "feature": feature_name}
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
                 "traceback": traceback.format_exc(),
-                "feature": name,
+                "feature": feature_name,
                 "elapsed_ms": round((time.time() - start) * 1000, 1),
             }
 
-    def execute_with_typed_params(self, name: str, **raw_kwargs) -> dict:
+    def execute_with_typed_params(self, feature_name: str, **raw_kwargs) -> dict:
         """带类型转换的参数执行"""
-        spec = self.get(name)
+        spec = self.get(feature_name)
         if not spec:
-            return {"success": False, "error": f"未知功能: {name}"}
+            return {"success": False, "error": f"未知功能: {feature_name}"}
         kwargs = {}
         for p in spec.params:
             if p.name in raw_kwargs:
                 kwargs[p.name] = _convert_type(raw_kwargs[p.name], p.type)
             elif not p.required and p.default is not None:
                 kwargs[p.name] = p.default
-        return self.execute(name, **kwargs)
+        return self.execute(feature_name, **kwargs)
 
     def export_mcp_tools(self) -> List[dict]:
         return [f.to_mcp_schema() for f in self.all() if not f.deprecated]
@@ -360,7 +361,9 @@ def _convert_type(value: str, target_type: str):
     if target_type == "int":
         return int(value)
     if target_type == "boolean":
-        return value.lower() in ("true", "1", "yes")
+        if isinstance(value, bool):
+            return value
+        return str(value).lower() in ("true", "1", "yes")
     return value  # str
 
 

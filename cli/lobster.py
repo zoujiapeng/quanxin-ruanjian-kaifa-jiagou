@@ -199,6 +199,7 @@ def cmd_info(args):
         import features.action_features  # noqa
         import features.perception_features  # noqa
         import features.ai_debug_features  # noqa
+        import features.system_features  # noqa
         from features.registry import registry
         spec = registry.get(args[0])
         if not spec:

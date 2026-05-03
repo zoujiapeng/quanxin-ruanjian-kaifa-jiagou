@@ -101,7 +101,7 @@ def call_feature(feature_name):
         kwargs = request.get_json(force=True, silent=True) or {}
     else:
         kwargs = dict(request.args)
-    result = registry.execute(spec.name, **kwargs)
+    result = registry.execute_with_typed_params(spec.name, **kwargs)
     code = 200 if result.get("success") else 500
     return jsonify(result), code
 

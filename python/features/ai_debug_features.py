@@ -321,7 +321,7 @@ def debug_system_info() -> dict:
         try:
             __import__(pkg)
             deps[pkg] = True
-        except ImportError:
+        except (ImportError, NameError):
             deps[pkg] = False
 
     all_features = registry.all()
