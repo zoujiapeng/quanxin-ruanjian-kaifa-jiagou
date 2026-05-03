@@ -314,6 +314,12 @@ class DSLExecutor:
         elif node.type == NodeType.IMAGE_FIND:
             self._exec_image_find(node, ctx)
 
+        elif node.type == NodeType.TEMPLATE_CAPTURE:
+            self._exec_template_capture(node, ctx)
+
+        elif node.type == NodeType.PROGRESS_WAIT:
+            self._exec_progress_wait(node, ctx)
+
         # SUBROUTINE 定义直接跳过（已在 parser 注册）
 
     # ── 指令执行 ─────────────────────────────────────────────────
@@ -504,6 +510,74 @@ class DSLExecutor:
             self._set_var("_image_y", result.get("center_y"))
             self._set_var("_image_confidence", result.get("confidence"))
         self._emit("node_done", node_type="IMAGE_FIND", args=args, line=node.line)
+
+    def _exec_template_capture(self, node: ASTNode, ctx: ExecutionContext):
+        """TEMPLATE_CAPTURE var_name template_name — 从变量取区域截图存为模板"""
+        args = self._interpolate(node.args)
+        parts = args.split(None, 1)
+        if len(parts) < 2:
+            self._log("TEMPLATE_CAPTURE: 需要 var_name 和 template_name")
+            return
+        var_name, template_name = parts[0], parts[1]
+        region_str = self._resolve_var(var_name) or ""
+        self._emit("node_start", node_type="TEMPLATE_CAPTURE", args=f"{template_name} ← ${var_name}", line=node.line)
+        self._log(f"TEMPLATE_CAPTURE: {template_name} 从 {var_name}={region_str}")
+        result = self._call_action("template_capture", template_name=template_name, region=region_str, ctx=ctx)
+        if isinstance(result, dict):
+            self._set_var("_template_saved", result.get("success", False))
+            self._set_var("_template_path", result.get("path", ""))
+        self._emit("node_done", node_type="TEMPLATE_CAPTURE", args=template_name, line=node.line)
+
+    def _exec_progress_wait(self, node: ASTNode, ctx: ExecutionContext):
+        """
+        PROGRESS_WAIT region threshold [timeout]
+        轮询检测进度条百分比，达标或超时后继续执行
+        """
+        args = self._interpolate(node.args)
+        self._emit("node_start", node_type="PROGRESS_WAIT", args=args, line=node.line)
+        self._log(f"PROGRESS_WAIT: {args}")
+
+        parts = args.split()
+        if len(parts) < 2:
+            self._log("PROGRESS_WAIT: 需要 region 和 threshold")
+            self._emit("node_done", node_type="PROGRESS_WAIT", args="error", line=node.line)
+            return
+
+        region_str = parts[0]
+        threshold = float(parts[1])
+        timeout = float(parts[2]) if len(parts) >= 3 else 30.0
+
+        reg_parts = region_str.split(",")
+        if len(reg_parts) != 4:
+            self._log(f"PROGRESS_WAIT: 无效区域 '{region_str}'，需要 x,y,w,h")
+            self._emit("node_done", node_type="PROGRESS_WAIT", args="error", line=node.line)
+            return
+
+        region = tuple(int(p.strip()) for p in reg_parts)
+        from perception.vision import ColorDetector
+
+        start = time.time()
+        last_log = 0.0
+        while time.time() - start < timeout:
+            ratio = ColorDetector.detect_progress_bar(region)
+            elapsed = time.time() - start
+
+            # 每 2 秒输出一次进度
+            if elapsed - last_log >= 2.0:
+                self._log(f"  进度: {ratio:.1%} ({elapsed:.0f}s / {timeout:.0f}s)")
+                last_log = elapsed
+
+            if ratio >= threshold:
+                self._log(f"  达标: {ratio:.1%} ≥ {threshold:.0%} (耗时 {elapsed:.1f}s)")
+                self._emit("node_done", node_type="PROGRESS_WAIT",
+                           args=f"done:{ratio:.1%}", line=node.line)
+                return
+
+            time.sleep(0.5)
+
+        self._log(f"  超时: 最终进度 {ratio:.1%} < {threshold:.0%} ({timeout:.0f}s)")
+        self._emit("node_done", node_type="PROGRESS_WAIT",
+                   args=f"timeout:{ratio:.1%}", line=node.line)
 
     # ── 层次化 DSL 执行 ──────────────────────────────────────────
     def _exec_call(self, node: ASTNode, ctx: ExecutionContext):

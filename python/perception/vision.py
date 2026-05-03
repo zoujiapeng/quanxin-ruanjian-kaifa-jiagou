@@ -284,34 +284,42 @@ class ColorDetector:
     ) -> float:
         """
         进度条识别，返回 0.0~1.0
+        算法: HSV饱和度加权 + 逐行/列找填充端 → 平均填充比例
         direction: 'horizontal' | 'vertical' | 'auto'
         """
         img = ScreenCapture.capture(region)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        s = hsv[:, :, 1].astype(np.float32)
+        v = hsv[:, :, 2].astype(np.float32)
 
-        h, w = binary.shape
+        # 饱和度加权亮度: 彩色(已填充)区域分数高，灰色(未填充)区域分数低
+        filled_score = s * (v / 255.0)
+        score_u8 = filled_score.astype(np.uint8)
+        mask = cv2.threshold(score_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+        # Otsu 单峰回退：全黑或全白则用固定阈值 30
+        white_px = np.sum(mask > 0)
+        if white_px == 0 or white_px == mask.size:
+            mask = cv2.threshold(score_u8, 30, 255, cv2.THRESH_BINARY)[1]
+
+        h, w = mask.shape
         if direction == "auto":
             direction = "horizontal" if w > h else "vertical"
 
         if direction == "horizontal":
-            filled = np.sum(binary, axis=0)
-            total = h * 255
-            col_ratios = filled / total
-            # 找到最右侧的高亮列
-            threshold_ratio = 0.3
-            filled_cols = np.where(col_ratios > threshold_ratio)[0]
-            if len(filled_cols) == 0:
-                return 0.0
-            return float(filled_cols[-1] + 1) / w
+            row_fills = []
+            for r in range(mask.shape[0]):
+                filled = np.where(mask[r, :] > 0)[0]
+                if len(filled) > 0:
+                    row_fills.append((filled[-1] + 1) / mask.shape[1])
+            return float(np.mean(row_fills)) if row_fills else 0.0
         else:
-            filled = np.sum(binary, axis=1)
-            total = w * 255
-            row_ratios = filled / total
-            filled_rows = np.where(row_ratios > 0.3)[0]
-            if len(filled_rows) == 0:
-                return 0.0
-            return float(filled_rows[-1] + 1) / h
+            col_fills = []
+            for c in range(mask.shape[1]):
+                filled = np.where(mask[:, c] > 0)[0]
+                if len(filled) > 0:
+                    col_fills.append((filled[-1] + 1) / mask.shape[0])
+            return float(np.mean(col_fills)) if col_fills else 0.0
 
 
 class SceneClassifier:

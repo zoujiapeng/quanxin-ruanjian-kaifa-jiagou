@@ -39,6 +39,8 @@ class NodeType(str, Enum):
     OCR_EXTRACT = "OCR_EXTRACT"
     REGION_SELECT = "REGION_SELECT"
     IMAGE_FIND = "IMAGE_FIND"
+    TEMPLATE_CAPTURE = "TEMPLATE_CAPTURE"
+    PROGRESS_WAIT = "PROGRESS_WAIT"
 
 
 @dataclass
@@ -97,7 +99,7 @@ class DSLParser:
                 "PARALLEL", "WITH",
                 "SCREENSHOT", "WAITSCREEN", "SCREENSTABLE",
                 "HOTKEY", "FOCUS", "SET", "OCR_FIND", "OCR_EXTRACT",
-                "REGION_SELECT", "IMAGE_FIND"}
+                "REGION_SELECT", "IMAGE_FIND", "TEMPLATE_CAPTURE", "PROGRESS_WAIT"}
 
     def __init__(self):
         self._tokens: List[tuple[int, str, str]] = []
@@ -194,6 +196,12 @@ class DSLParser:
 
             elif keyword == "IMAGE_FIND":
                 nodes.append(ASTNode(NodeType.IMAGE_FIND, args, line=lineno))
+
+            elif keyword == "TEMPLATE_CAPTURE":
+                nodes.append(ASTNode(NodeType.TEMPLATE_CAPTURE, args, line=lineno))
+
+            elif keyword == "PROGRESS_WAIT":
+                nodes.append(ASTNode(NodeType.PROGRESS_WAIT, args, line=lineno))
 
             elif keyword == "WAIT":
                 nodes.append(ASTNode(NodeType.WAIT, args, line=lineno))

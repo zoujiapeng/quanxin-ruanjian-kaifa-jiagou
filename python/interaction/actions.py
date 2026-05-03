@@ -277,6 +277,7 @@ class ActionHandler:
     def __init__(self, template_dir: str = ""):
         abs_template_dir = template_dir or os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "templates"))
+        self._template_dir = abs_template_dir
         self.ocr = OCREngine()
         self.matcher = TemplateMatcher(template_dir=abs_template_dir)
         self.detector = ChangeDetector()
@@ -306,6 +307,7 @@ class ActionHandler:
             "ocr_extract": self._handle_ocr_extract,
             "region_select": self._handle_region_select,
             "image_find": self._handle_image_find,
+            "template_capture": self._handle_template_capture,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -415,6 +417,20 @@ class ActionHandler:
             return {"found": True, "center_x": cx, "center_y": cy,
                     "confidence": confidence, "template": template}
         return {"found": False, "template": template}
+
+    def _handle_template_capture(self, template_name: str, region: str = "", ctx=None, **_) -> dict:
+        """从变量取区域截图存为模板文件"""
+        import cv2
+        reg = self._parse_region(region) if region else None
+        if not reg:
+            return {"success": False, "error": f"无效区域: {region}"}
+        img = ScreenCapture.capture(reg)
+        if img is None or img.size == 0:
+            return {"success": False, "error": "截图失败"}
+        os.makedirs(self._template_dir, exist_ok=True)
+        path = os.path.join(self._template_dir, f"{template_name}.png")
+        cv2.imwrite(path, img)
+        return {"success": True, "path": path, "width": img.shape[1], "height": img.shape[0]}
 
     @staticmethod
     def _parse_region(s: str):
