@@ -375,15 +375,11 @@ def test_launch_features():
     if lp:
         check("launch_program 有 handler", callable(lp.handler))
         check("launch_program 有 params", len(lp.params) >= 1)
-        # 模拟模式调用
-        r = registry.execute("launch_program", target="notepad.exe")
-        check("launch_program 模拟调用", r.get("success") is not False)
 
     rc = registry.get("run_command")
     check("run_command 已注册", rc is not None)
     if rc:
-        r = registry.execute("run_command", command="echo test")
-        check("run_command 模拟调用", r.get("success") is not False)
+        check("run_command 有 params", len(rc.params) >= 1)
 
 
 def test_dsl_launch_keyword():

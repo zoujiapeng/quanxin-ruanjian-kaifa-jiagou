@@ -543,4 +543,5 @@ class DSLExecutor:
 
 class BreakLoop(Exception):
     """用于从 LOOP 内部跳出的控制流异常"""
-    pass
+    def __str__(self):
+        return "BREAK 只能在 LOOP 内部使用"
