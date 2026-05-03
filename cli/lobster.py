@@ -301,12 +301,20 @@ def cmd_exec(args):
 
     try:
         from engine.executor import DSLExecutor
-        exe = DSLExecutor()
+        from interaction.actions import ActionHandler
+        exe = DSLExecutor(action_handler=ActionHandler())
+        # 把日志输出到控制台
+        exe.on("log", lambda **kw: print(f"  {kw.get('message','')}", flush=True))
+        exe.on("node_start", lambda **kw: print(f"  ▶ {kw['node_type']}: {str(kw.get('args',''))[:60]}", flush=True))
         result = exe.run_dsl_sync(dsl)
-        if result:
-            print(f"\n执行完成: state={result.get('state','?')}, elapsed={result.get('elapsed',0)}s")
+        success = result.get("success", True)
+        state = result.get("state", "?")
+        elapsed = result.get("elapsed", 0)
+        if not success:
+            print(f"\n✗ 执行失败: {result.get('error','未知错误')}", file=sys.stderr)
+            sys.exit(1)
         else:
-            print("\n执行完成")
+            print(f"\n✓ 执行完成: state={state}")
     except Exception as e:
         print(f"执行失败: {e}", file=sys.stderr)
         import traceback

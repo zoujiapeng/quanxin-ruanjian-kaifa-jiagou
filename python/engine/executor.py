@@ -315,10 +315,18 @@ class DSLExecutor:
 
     # ── 指令执行 ─────────────────────────────────────────────────
     def _exec_click(self, node: ASTNode, ctx: ExecutionContext):
-        target = self._interpolate(node.args)
+        raw = node.args
+        button = "left"
+        if raw.upper().endswith(" RIGHT"):
+            button = "right"
+            raw = raw[:-6]
+        elif raw.upper().endswith(" R"):
+            button = "right"
+            raw = raw[:-2]
+        target = self._interpolate(raw)
         self._emit("node_start", node_type="CLICK", args=target, line=node.line)
-        self._log(f"CLICK: {target}")
-        self._call_action("click", target=target, ctx=ctx)
+        self._log(f"CLICK ({button}): {target}")
+        self._call_action("click", target=target, button=button, ctx=ctx)
         self._emit("node_done", node_type="CLICK", args=target, line=node.line)
 
     def _exec_type(self, node: ASTNode, ctx: ExecutionContext):

@@ -1,5 +1,7 @@
 """
 Region Picker: 用户交互式框选屏幕区域
+
+单窗口（根窗口全屏透明遮罩 + Canvas 绘制选区）
 显示全屏半透明遮罩 → 用户拖拽 → 返回 (x, y, w, h)
 
 其他 AI 项目做不到的事:
@@ -14,7 +16,7 @@ from typing import Optional, Tuple
 
 
 class RegionPicker:
-    """全屏交互式区域选择器"""
+    """全屏交互式区域选择器（单窗口版）"""
 
     @staticmethod
     def pick(message: str = "请拖拽选择区域，按 ESC 取消") -> Optional[Tuple[int, int, int, int]]:
@@ -29,65 +31,70 @@ class RegionPicker:
         root = tk.Tk()
         root.attributes("-fullscreen", True)
         root.attributes("-topmost", True)
-        root.attributes("-alpha", 0.3)  # 半透明
+        root.attributes("-alpha", 0.4)  # 半透明
         root.configure(bg="black")
         root.title("Lobster Region Picker")
-        root.cursor("crosshair")
+        root.focus_force()
 
-        # 提示文字 Canvas
-        canvas = tk.Canvas(root, highlightthickness=0)
+        # Canvas 覆盖全屏
+        canvas = tk.Canvas(root, highlightthickness=0, cursor="crosshair")
         canvas.pack(fill=tk.BOTH, expand=True)
-
-        # 遮罩层（第二个全屏透明窗口绘制选区边框）
-        overlay = tk.Toplevel(root)
-        overlay.attributes("-fullscreen", True)
-        overlay.attributes("-topmost", True)
-        overlay.attributes("-alpha", 0.01)  # 几乎透明，只用来画线
-        overlay.configure(bg="white")
-        overlay.cursor("crosshair")
-
-        canvas_overlay = tk.Canvas(overlay, highlightthickness=0, bg="white")
-        canvas_overlay.pack(fill=tk.BOTH, expand=True)
 
         # 状态
         start_x, start_y = 0, 0
         rect_id = None
         label_id = None
+        text_items = []
+
+        def draw_hint():
+            """在 Canvas 上绘制提示文字（白色，常亮）"""
+            nonlocal text_items
+            sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+            items = []
+            items.append(canvas.create_text(
+                sw // 2, 60,
+                text=message,
+                fill="white", font=("Microsoft YaHei", 22, "bold"),
+                anchor="center",
+            ))
+            items.append(canvas.create_text(
+                sw // 2, 100,
+                text="拖拽选择区域 · ESC 取消",
+                fill="#cccccc", font=("Microsoft YaHei", 14),
+                anchor="center",
+            ))
+            text_items = items
 
         def on_mouse_down(event):
             nonlocal start_x, start_y, rect_id, label_id
             start_x, start_y = event.x_root, event.y_root
             if rect_id:
-                canvas_overlay.delete(rect_id)
+                canvas.delete(rect_id)
             if label_id:
-                canvas_overlay.delete(label_id)
-            # 画选区矩形（在 overlay canvas 上）
-            rect_id = canvas_overlay.create_rectangle(
+                canvas.delete(label_id)
+            rect_id = canvas.create_rectangle(
                 start_x, start_y, start_x, start_y,
-                outline="red", width=3, dash=(6, 3),
+                outline="#00ff00", width=3, dash=(6, 3),
             )
-            # 坐标标签
-            label_id = canvas_overlay.create_text(
+            label_id = canvas.create_text(
                 start_x + 10, start_y - 20,
                 text=f"({start_x}, {start_y})",
-                fill="red", font=("Arial", 14, "bold"),
-                anchor="w", tags="label",
+                fill="#00ff00", font=("Arial", 13, "bold"),
+                anchor="w",
             )
 
         def on_mouse_move(event):
-            nonlocal rect_id
             if rect_id:
                 cx, cy = event.x_root, event.y_root
-                canvas_overlay.coords(rect_id, start_x, start_y, cx, cy)
-                canvas_overlay.coords(label_id, start_x + 10, start_y - 20)
+                canvas.coords(rect_id, start_x, start_y, cx, cy)
+                canvas.coords(label_id, start_x + 10, start_y - 20)
                 w, h = abs(cx - start_x), abs(cy - start_y)
-                canvas_overlay.itemconfig(
+                canvas.itemconfig(
                     label_id,
                     text=f"({start_x}, {start_y}) → ({cx}, {cy})  [{w}×{h}]",
                 )
 
         def on_mouse_up(event):
-            nonlocal rect_id
             if rect_id:
                 x1, y1, x2, y2 = start_x, start_y, event.x_root, event.y_root
                 x, y = min(x1, x2), min(y1, y2)
@@ -102,28 +109,15 @@ class RegionPicker:
                 root.quit()
                 root.destroy()
 
-        # 提示文字
-        canvas.create_text(
-            root.winfo_screenwidth() // 2, 60,
-            text=message,
-            fill="white", font=("Microsoft YaHei", 24, "bold"),
-            anchor="center",
-        )
-        canvas.create_text(
-            root.winfo_screenwidth() // 2, 110,
-            text="拖拽选择区域 · ESC 取消",
-            fill="#cccccc", font=("Microsoft YaHei", 14),
-            anchor="center",
-        )
+        # 绘制提示
+        draw_hint()
 
-        # 绑定事件（在 overlay 上绑定才能捕获全屏）
-        overlay.bind("<ButtonPress-1>", on_mouse_down)
-        overlay.bind("<B1-Motion>", on_mouse_move)
-        overlay.bind("<ButtonRelease-1>", on_mouse_up)
+        # 绑定事件
+        canvas.tag_bind("all", "<ButtonPress-1>", on_mouse_down)
+        root.bind("<ButtonPress-1>", on_mouse_down)
+        root.bind("<B1-Motion>", on_mouse_move)
+        root.bind("<ButtonRelease-1>", on_mouse_up)
         root.bind("<Escape>", on_key)
-
-        # 让 overlay 获取焦点
-        overlay.focus_set()
 
         try:
             root.mainloop()

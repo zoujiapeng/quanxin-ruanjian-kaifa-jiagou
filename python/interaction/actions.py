@@ -129,6 +129,7 @@ class ClickTarget:
         region: Optional[BBox] = None,
         timeout: float = 10.0,
         human: bool = True,
+        button: str = "left",
     ) -> bool:
         """
         尝试点击目标:
@@ -141,9 +142,9 @@ class ClickTarget:
             pt = self._find_target(target, region)
             if pt:
                 if human:
-                    HumanMouse.click(pt[0], pt[1])
+                    HumanMouse.click(pt[0], pt[1], button=button)
                 else:
-                    pyautogui.click(pt[0], pt[1])
+                    pyautogui.click(pt[0], pt[1], button=button)
                 return True
             time.sleep(0.3)
         return False
@@ -306,9 +307,9 @@ class ActionHandler:
             raise ValueError(f"未知动作: {action}")
         return handler(**kwargs)
 
-    def _handle_click(self, target: str, ctx=None, **_) -> bool:
+    def _handle_click(self, target: str, button: str = "left", ctx=None, **_) -> bool:
         region = ctx.variables.get("region") if ctx else None
-        return self.clicker.click(target, region=region)
+        return self.clicker.click(target, region=region, button=button)
 
     def _handle_wait(self, condition: str, timeout: float = 30.0, ctx=None, **_) -> bool:
         region = ctx.variables.get("region") if ctx else None
