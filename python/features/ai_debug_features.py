@@ -341,6 +341,35 @@ def debug_system_info() -> dict:
     }
 
 
+@feature(
+    name="debug_generate_test_flow",
+    display_name="生成测试流程图",
+    description="AI自主生成测试场景的DSL和流程图，用于验证系统功能",
+    category=F.DEBUG,
+    params=[
+        P("scenario", "str", "测试场景描述", example="测试点击和等待功能"),
+        P("api_key", "str", "API Key（可选）", required=False, default=""),
+    ],
+    returns="dict{dsl, graph, description}",
+    test_cases=[
+        TC("gen_test_flow", {"scenario": "基础点击测试"}, "success"),
+    ],
+)
+def debug_generate_test_flow(scenario: str, api_key: str = "") -> dict:
+    dsl_result = ai_generate_dsl(
+        task=f"[测试场景] {scenario}\n要求：生成可验证功能的完整测试流程",
+        api_key=api_key,
+    )
+    dsl = dsl_result.get("dsl", "CLICK 测试按钮\nWAIT 测试完成")
+    graph = dsl_to_graph(dsl)
+    return {
+        "dsl": dsl,
+        "graph": graph,
+        "description": f"测试场景: {scenario}",
+        "tokens_used": dsl_result.get("input_tokens", 0) + dsl_result.get("output_tokens", 0),
+    }
+
+
 # ── 内部工具 ──────────────────────────────────────────────────────
 def _build_feature_context() -> str:
     lines = []

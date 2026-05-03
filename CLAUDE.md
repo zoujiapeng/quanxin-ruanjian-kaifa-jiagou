@@ -1,5 +1,7 @@
 # Lobster — Claude Code 调试指南
 
+> 本文件指导 Claude Code 如何自主调试、扩展和测试系统。
+
 ## 系统架构
 
 ```
@@ -73,6 +75,22 @@ lobster test
 lobster list
 ```
 
+注册后自动获得：
+- **MCP 工具**: `lobster_my_feature`
+- **CLI 命令**: `lobster call my_feature --target XXX`
+- **HTTP API**: `POST /api/feature/my_feature`
+- **DSL 语法**: `MY_CMD XXX`
+- **测试用例**: `lobster test` 自动执行
+
+## 关键文件
+- `python/features/registry.py` — 注册表核心
+- `python/features/action_features.py` — 动作功能 (CLICK/TYPE/SCROLL/DRAG/HOTKEY)
+- `python/features/perception_features.py` — 感知功能 (OCR/图像/颜色/进度条)
+- `python/features/ai_debug_features.py` — AI + 调试功能
+- `python/mcp/server.py` — MCP 服务端（从 registry 动态生成工具）
+- `cli/lobster.py` — CLI 入口（自动接收新功能）
+- `python/server.py` — HTTP 后端（registry 自动路由）
+
 ## MCP 配置 (Claude Desktop)
 ```json
 {
@@ -84,12 +102,3 @@ lobster list
   }
 }
 ```
-
-## 关键文件
-- `python/features/registry.py` — 注册表核心
-- `python/features/action_features.py` — 动作功能 (CLICK/TYPE/SCROLL/DRAG/HOTKEY)
-- `python/features/perception_features.py` — 感知功能 (OCR/图像/颜色/进度条)
-- `python/features/ai_debug_features.py` — AI + 调试功能
-- `python/mcp/server.py` — MCP 服务端
-- `cli/lobster.py` — CLI 入口
-- `python/server.py` — HTTP 后端

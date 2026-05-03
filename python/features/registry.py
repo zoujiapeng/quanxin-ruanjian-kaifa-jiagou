@@ -67,11 +67,14 @@ class FeatureSpec:
 
     # 自动生成的字段
     mcp_tool_name: str = ""
+    cli_command: str = ""
     http_endpoint: str = ""
 
     def __post_init__(self):
         if not self.mcp_tool_name:
             self.mcp_tool_name = f"lobster_{self.name}"
+        if not self.cli_command:
+            self.cli_command = self.name.replace("_", "-")
         if not self.http_endpoint:
             self.http_endpoint = f"/api/feature/{self.name}"
 
@@ -98,7 +101,7 @@ class FeatureSpec:
         }
 
     def to_cli_help(self) -> str:
-        lines = [f"  {self.name} - {self.display_name}", f"    描述: {self.description}"]
+        lines = [f"  {self.cli_command} - {self.display_name}", f"    描述: {self.description}"]
         for p in self.params:
             req = "" if p.required else f" (默认: {p.default})"
             lines.append(f"    --{p.name} [{p.type}]{req}: {p.description}")
@@ -118,6 +121,7 @@ class FeatureSpec:
             "dsl_template": self.dsl_template,
             "examples": self.examples,
             "mcp_tool_name": self.mcp_tool_name,
+            "cli_command": self.cli_command,
             "http_endpoint": self.http_endpoint,
             "version": self.version,
             "deprecated": self.deprecated,
