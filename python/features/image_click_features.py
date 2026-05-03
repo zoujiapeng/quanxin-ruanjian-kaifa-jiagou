@@ -22,7 +22,7 @@ from features._utils import parse_region
 根据用户选择执行:
   1. 截取 → 先 REGION_SELECT 框选区域，再 TEMPLATE_CAPTURE {var} 名称 存为模板
   2. 文件选择 → 调用 select_images 让用户从文件管理器选图，自动复制到模板目录
-  3. 口头说明 → [稍后实现] 调自然语言搜图指令
+  3. 口头说明 → 调 search_images 搜索本地图片
 
 然后调用本工具传入模板名列表按优先级点击。
 
