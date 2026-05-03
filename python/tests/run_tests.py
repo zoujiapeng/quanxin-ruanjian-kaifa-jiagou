@@ -24,6 +24,9 @@ import features.filedialog_features  # noqa
 import features.a11y_features        # noqa
 import features.macro_features       # noqa
 import features.multimedia_features  # noqa
+import features.fusion_features      # noqa
+import features.persistence_features # noqa
+import features.healing_features     # noqa
 
 from features.registry import registry
 

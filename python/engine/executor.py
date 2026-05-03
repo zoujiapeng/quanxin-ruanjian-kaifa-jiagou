@@ -1,9 +1,12 @@
 """
-执行层: 状态机驱动的DSL执行器
+执行层: 状态机驱动的 DSL 执行器
 支持: 暂停/恢复/停止, 循环, 条件, 子流程, 事件回调
+      子程序(CALL/SUBROUTINE), IMPORT, RETURN, 变量插值
 """
 
 from __future__ import annotations
+import os
+import re
 import time
 import threading
 import traceback
@@ -30,10 +33,18 @@ class ExecutionContext:
     max_loops: int = 9999
     retry_limit: int = 3
     timeout: float = 30.0
+    max_call_depth: int = 50
 
 
 class ExecutionError(Exception):
     pass
+
+
+class ReturnSignal(Exception):
+    """从子程序返回的信号，携带返回值"""
+    def __init__(self, value: Any = None):
+        self.value = value
+        super().__init__()
 
 
 class DSLExecutor:
@@ -45,10 +56,15 @@ class DSLExecutor:
     def __init__(self, action_handler=None):
         self._state = ExecutorState.IDLE
         self._pause_event = threading.Event()
-        self._pause_event.set()          # 默认不暂停
+        self._pause_event.set()
         self._stop_flag = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._action_handler = action_handler  # 实际操作模块
+        self._action_handler = action_handler
+
+        # 层次化 DSL 支持
+        self._subroutines: dict[str, ASTNode] = {}
+        self._scope_stack: list[dict[str, Any]] = [{}]  # 作用域链
+        self._call_depth = 0
 
         # 事件回调
         self._callbacks: Dict[str, list[Callable]] = {
@@ -59,30 +75,68 @@ class DSLExecutor:
             "log": [],
         }
 
+    # ── 作用域管理 ────────────────────────────────────────────────
+    def _current_scope(self) -> dict:
+        return self._scope_stack[-1]
+
+    def _push_scope(self, bindings: Optional[dict] = None):
+        self._scope_stack.append(bindings or {})
+
+    def _pop_scope(self) -> dict:
+        return self._scope_stack.pop()
+
+    def _resolve_var(self, name: str) -> Optional[Any]:
+        for scope in reversed(self._scope_stack):
+            if name in scope:
+                return scope[name]
+        return None
+
+    def _set_var(self, name: str, value: Any):
+        """设置变量（在当前作用域）"""
+        self._current_scope()[name] = value
+
+    def _interpolate(self, text: str) -> str:
+        """替换 {var} 为变量值"""
+        def replacer(m):
+            var_name = m.group(1)
+            val = self._resolve_var(var_name)
+            if val is not None:
+                return str(val)
+            return m.group(0)  # 保留未解析的占位符
+        return re.sub(r"\{(\w+)\}", replacer, text)
+
     # ── 公开控制 API ─────────────────────────────────────────────
     def run_dsl(self, source: str, ctx: Optional[ExecutionContext] = None):
-        """解析并异步执行DSL"""
+        """解析并异步执行 DSL"""
         if self._state == ExecutorState.RUNNING:
             raise ExecutionError("执行器已在运行中")
-        ast = DSLParser.from_string(source)
+        parser = DSLParser()
+        ast = parser.parse(source)
+        self._subroutines = parser.subroutines
         ctx = ctx or ExecutionContext()
-        self._stop_flag.clear()
-        self._pause_event.set()
-        self._set_state(ExecutorState.RUNNING)
+        self._reset_state(ctx)
         self._thread = threading.Thread(
             target=self._run_thread, args=(ast, ctx), daemon=True
         )
         self._thread.start()
 
     def run_dsl_sync(self, source: str, ctx: Optional[ExecutionContext] = None):
-        """同步执行DSL（阻塞）"""
-        ast = DSLParser.from_string(source)
+        """同步执行 DSL（阻塞）"""
+        parser = DSLParser()
+        ast = parser.parse(source)
+        self._subroutines = parser.subroutines
         ctx = ctx or ExecutionContext()
+        self._reset_state(ctx)
+        self._execute_node(ast, ctx)
+        if not self._stop_flag.is_set():
+            self._set_state(ExecutorState.FINISHED)
+
+    def _reset_state(self, ctx: ExecutionContext):
         self._stop_flag.clear()
         self._pause_event.set()
+        self._scope_stack = [dict(ctx.variables)]
+        self._call_depth = 0
         self._set_state(ExecutorState.RUNNING)
-        self._execute_node(ast, ctx)
-        self._set_state(ExecutorState.FINISHED)
 
     def pause(self):
         if self._state == ExecutorState.RUNNING:
@@ -96,7 +150,7 @@ class DSLExecutor:
 
     def stop(self):
         self._stop_flag.set()
-        self._pause_event.set()   # 解除暂停以便线程退出
+        self._pause_event.set()
         self._set_state(ExecutorState.STOPPED)
 
     @property
@@ -120,12 +174,15 @@ class DSLExecutor:
             self._execute_node(ast, ctx)
             if not self._stop_flag.is_set():
                 self._set_state(ExecutorState.FINISHED)
+        except ReturnSignal:
+            # 顶层 RETURN 忽略
+            if not self._stop_flag.is_set():
+                self._set_state(ExecutorState.FINISHED)
         except Exception as e:
             self._emit("error", message=str(e), traceback=traceback.format_exc())
             self._set_state(ExecutorState.ERROR)
 
     def _check_control(self):
-        """检查暂停/停止信号"""
         self._pause_event.wait()
         if self._stop_flag.is_set():
             raise ExecutionError("执行已被用户停止")
@@ -152,17 +209,31 @@ class DSLExecutor:
         elif node.type == NodeType.RUN:
             self._exec_run(node, ctx)
 
+        elif node.type == NodeType.CALL:
+            self._exec_call(node, ctx)
+
+        elif node.type == NodeType.IMPORT:
+            self._exec_import(node, ctx)
+
+        elif node.type == NodeType.RETURN:
+            raise ReturnSignal(node.args)
+
+        # SUBROUTINE 定义直接跳过（已在 parser 注册）
+
+    # ── 指令执行 ─────────────────────────────────────────────────
     def _exec_click(self, node: ASTNode, ctx: ExecutionContext):
-        self._emit("node_start", node_type="CLICK", args=node.args, line=node.line)
-        self._log(f"CLICK: {node.args}")
-        self._call_action("click", target=node.args, ctx=ctx)
-        self._emit("node_done", node_type="CLICK", args=node.args, line=node.line)
+        target = self._interpolate(node.args)
+        self._emit("node_start", node_type="CLICK", args=target, line=node.line)
+        self._log(f"CLICK: {target}")
+        self._call_action("click", target=target, ctx=ctx)
+        self._emit("node_done", node_type="CLICK", args=target, line=node.line)
 
     def _exec_wait(self, node: ASTNode, ctx: ExecutionContext):
-        self._emit("node_start", node_type="WAIT", args=node.args, line=node.line)
-        self._log(f"WAIT: {node.args}")
-        self._call_action("wait", condition=node.args, timeout=ctx.timeout, ctx=ctx)
-        self._emit("node_done", node_type="WAIT", args=node.args, line=node.line)
+        condition = self._interpolate(node.args)
+        self._emit("node_start", node_type="WAIT", args=condition, line=node.line)
+        self._log(f"WAIT: {condition}")
+        self._call_action("wait", condition=condition, timeout=ctx.timeout, ctx=ctx)
+        self._emit("node_done", node_type="WAIT", args=condition, line=node.line)
 
     def _exec_loop(self, node: ASTNode, ctx: ExecutionContext):
         tag = node.args or "_default"
@@ -183,27 +254,76 @@ class DSLExecutor:
         self._emit("node_done", node_type="LOOP", args=node.args, line=node.line)
 
     def _exec_if(self, node: ASTNode, ctx: ExecutionContext):
-        self._emit("node_start", node_type="IF", args=node.args, line=node.line)
-        self._log(f"IF: {node.args}")
-        result = self._call_action("check_condition", condition=node.args, ctx=ctx)
+        condition = self._interpolate(node.args)
+        self._emit("node_start", node_type="IF", args=condition, line=node.line)
+        self._log(f"IF: {condition}")
+        result = self._call_action("check_condition", condition=condition, ctx=ctx)
         branch = node.children if result else node.else_children
         for child in branch:
             self._execute_node(child, ctx)
-        self._emit("node_done", node_type="IF", args=node.args, line=node.line)
+        self._emit("node_done", node_type="IF", args=condition, line=node.line)
 
     def _exec_run(self, node: ASTNode, ctx: ExecutionContext):
-        self._emit("node_start", node_type="RUN", args=node.args, line=node.line)
-        self._log(f"RUN 宏: {node.args}")
-        self._call_action("run_macro", macro_name=node.args, ctx=ctx)
-        self._emit("node_done", node_type="RUN", args=node.args, line=node.line)
+        macro = self._interpolate(node.args)
+        self._emit("node_start", node_type="RUN", args=macro, line=node.line)
+        self._log(f"RUN 宏: {macro}")
+        self._call_action("run_macro", macro_name=macro, ctx=ctx)
+        self._emit("node_done", node_type="RUN", args=macro, line=node.line)
 
+    # ── 层次化 DSL 执行 ──────────────────────────────────────────
+    def _exec_call(self, node: ASTNode, ctx: ExecutionContext):
+        name = node.args
+        if name not in self._subroutines:
+            raise ExecutionError(f"未定义的子程序: '{name}'")
+
+        if self._call_depth >= ctx.max_call_depth:
+            raise ExecutionError(f"调用深度超过限制({ctx.max_call_depth}): '{name}'")
+        self._call_depth += 1
+
+        sub = self._subroutines[name]
+        # 在调用者作用域中解析参数，绑定到子程序的参数名
+        bindings = {}
+        for i, param in enumerate(sub.params):
+            if i < len(node.call_args):
+                raw = node.call_args[i]
+                resolved = self._interpolate(raw)
+                bindings[param] = resolved
+            else:
+                bindings[param] = None
+
+        self._push_scope(bindings)
+        self._log(f"CALL {name}({', '.join(f'{k}={v}' for k, v in bindings.items())})")
+        try:
+            for child in sub.children:
+                self._execute_node(child, ctx)
+        except ReturnSignal as ret:
+            self._log(f"  RETURN {sub.name} -> {ret.value}")
+            return ret.value
+        finally:
+            self._pop_scope()
+            self._call_depth -= 1
+
+    def _exec_import(self, node: ASTNode, ctx: ExecutionContext):
+        path = node.args
+        if not os.path.isabs(path):
+            path = os.path.join(os.getcwd(), path)
+        if not os.path.exists(path):
+            raise ExecutionError(f"IMPORT 文件不存在: '{path}'")
+        with open(path, "r", encoding="utf-8") as f:
+            source = f.read()
+        parser = DSLParser()
+        parser.parse(source)
+        count = len(parser.subroutines)
+        self._subroutines.update(parser.subroutines)
+        self._log(f"IMPORT '{os.path.basename(path)}' ({count} 个子程序)")
+
+    # ── 动作调用 ─────────────────────────────────────────────────
     def _call_action(self, action: str, **kwargs) -> Any:
-        """调用感知/交互层，带重试"""
         if self._action_handler is None:
             self._log(f"  [模拟] {action}({kwargs})")
             return True
         retry_limit = kwargs.pop("retry_limit", 3)
-        ctx = kwargs.get("ctx")
+        ctx = kwargs.pop("ctx", None)
         retry_limit = ctx.retry_limit if ctx else retry_limit
         last_err = None
         for attempt in range(1, retry_limit + 1):
@@ -213,7 +333,31 @@ class DSLExecutor:
                 last_err = e
                 self._log(f"  [重试 {attempt}/{retry_limit}] {action} 失败: {e}")
                 time.sleep(0.5 * attempt)
-        raise ExecutionError(f"动作 '{action}' 在 {retry_limit} 次重试后失败: {last_err}")
+        # 所有重试失败 → 启动自愈管道
+        return self._heal_action(action, kwargs, last_err, ctx)
+
+    def _heal_action(self, action: str, context: dict, error: Exception,
+                     ctx: Optional[ExecutionContext]) -> Any:
+        """使用自愈管道尝试恢复"""
+        self._log(f"  [自愈] {action} 所有重试失败，尝试恢复策略...")
+        try:
+            from engine.healing import get_healing_pipeline
+            pipeline = get_healing_pipeline(self._action_handler)
+            heal_context = {
+                "action": action,
+                "target": context.get("target", ""),
+                "region": context.get("region"),
+                "error": str(error),
+            }
+            result = pipeline.heal(action, str(error), heal_context,
+                                   retry_action=lambda c: self._action_handler(action, **c))
+            if result.success:
+                self._log(f"  [自愈] [{result.strategy}] 恢复成功")
+                return result.result
+            self._log(f"  [自愈] 所有策略失败: {result.error}")
+        except Exception as heal_err:
+            self._log(f"  [自愈] 管道异常: {heal_err}")
+        raise ExecutionError(f"动作 '{action}' 在重试和自愈后失败: {error}")
 
     def _set_state(self, state: ExecutorState):
         self._state = state
@@ -224,5 +368,5 @@ class DSLExecutor:
 
 
 class BreakLoop(Exception):
-    """用于从LOOP内部跳出的控制流异常"""
+    """用于从 LOOP 内部跳出的控制流异常"""
     pass
