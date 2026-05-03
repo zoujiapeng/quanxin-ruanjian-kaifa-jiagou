@@ -14,7 +14,7 @@ from features.registry import feature, P, TC, FeatureCategory as F
         P("limit", "int", "最多返回条数", required=False, default=20),
     ],
     returns="list[dict] - 断点列表",
-    tags=["待完善"],
+    tags=["persistence", "store"],
 )
 def exec_list_checkpoints(limit: int = 20) -> list:
     try:
@@ -33,7 +33,7 @@ def exec_list_checkpoints(limit: int = 20) -> list:
         P("task_id", "str", "任务ID"),
     ],
     returns="dict - 断点详情",
-    tags=["待完善"],
+    tags=["persistence", "store"],
 )
 def exec_get_checkpoint(task_id: str) -> dict:
     try:
@@ -64,7 +64,7 @@ def exec_get_checkpoint(task_id: str) -> dict:
         P("task_id", "str", "任务ID"),
     ],
     returns="bool - 是否成功",
-    tags=["待完善"],
+    tags=["persistence", "store"],
 )
 def exec_delete_checkpoint(task_id: str) -> bool:
     try:
@@ -84,7 +84,7 @@ def exec_delete_checkpoint(task_id: str) -> bool:
         P("feature_name", "str", "功能名称（可选，仅查看单个功能统计）", required=False, default=""),
     ],
     returns="dict - 统计信息",
-    tags=["待完善"],
+    tags=["persistence", "telemetry"],
 )
 def exec_telemetry_stats(feature_name: str = "") -> dict:
     try:
@@ -107,7 +107,7 @@ def exec_telemetry_stats(feature_name: str = "") -> dict:
         P("value", "str", "敏感值", example="my_password"),
     ],
     returns="bool - 是否成功",
-    tags=["待完善"],
+    tags=["persistence", "vault"],
 )
 def exec_vault_set(key: str, value: str) -> bool:
     try:
@@ -127,7 +127,7 @@ def exec_vault_set(key: str, value: str) -> bool:
         P("key", "str", "键名", example="wechat_password"),
     ],
     returns="str - 存储的值（如不存在返回空字符串）",
-    tags=["待完善"],
+    tags=["persistence", "vault"],
 )
 def exec_vault_get(key: str) -> str:
     try:
@@ -144,7 +144,7 @@ def exec_vault_get(key: str) -> str:
     category=F.SYSTEM,
     params=[],
     returns="list[str] - 键名列表",
-    tags=["待完善"],
+    tags=["persistence", "vault"],
 )
 def exec_vault_list() -> list:
     try:

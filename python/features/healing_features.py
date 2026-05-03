@@ -12,7 +12,7 @@ from features.registry import feature, P, TC, FeatureCategory as F
     category=F.DEBUG,
     params=[],
     returns="dict{strategy, rate, samples} - 各策略可靠性",
-    tags=["待完善"],
+    tags=["healing", "diagnostic"],
 )
 def heal_reliability() -> dict:
     try:
@@ -32,7 +32,7 @@ def heal_reliability() -> dict:
         P("limit", "int", "返回条数", required=False, default=20),
     ],
     returns="list[dict] - 自愈事件列表",
-    tags=["待完善"],
+    tags=["healing", "diagnostic"],
 )
 def heal_history(limit: int = 20) -> list:
     try:
@@ -49,7 +49,7 @@ def heal_history(limit: int = 20) -> list:
     category=F.DEBUG,
     params=[],
     returns="bool - 是否成功",
-    tags=["待完善"],
+    tags=["healing", "diagnostic"],
 )
 def heal_reset_stats() -> bool:
     try:
