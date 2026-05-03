@@ -1,0 +1,11 @@
+﻿{
+  "mcpServers": {
+    "lobster": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "C:\\Users\\zou\\Desktop\\claude1\\cli\\lobster_mcp.py"
+      ]
+    }
+  }
+}

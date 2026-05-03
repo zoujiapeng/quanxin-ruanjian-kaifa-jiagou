@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lobster": {
+      "command": "python",
+      "args": ["cli/lobster_mcp.py"]
+    }
+  }
+}

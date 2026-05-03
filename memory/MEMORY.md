@@ -1,0 +1,11 @@
+- [User preferences](user_preferences.md) — Chinese UI, minimal canvas-first layout, git workflow with SOCKS5 proxy
+- [Project architecture](project_architecture.md) — Electron/React/Zustand stack, overlay layout, panel auto-hide, native menu
+- [UI feedback guidance](feedback_ui.md) — Hover-based panel visibility, absolute positioning for hidden elements, fitToScreen offsets
+- [Templates pattern](templates_pattern.md) — PRESET_TEMPLATES (store) + PRESET_LIST (TopBar) must both be updated
+- [2026-05-02 测试记录](测试记录_20260502.md) — 6个高级节点测试: color_check/progress_wait已实现, 4个stub, find_text_position坐标bug
+- [测试残留问题](测试残留.md) — 架构测试不应有副作用的执行（启动真实进程）
+- [递归测试概念](递归测试.md) — 用 Lobster 自举: Claude Code → 终端 → 新 Claude → 发自然语言 prompt 执行任务
+- [递归测试实现](递归测试_实现.md) — Lobster 生成终端脚本 → 新终端跑 claude → 发中文 prompt
+- [递归测试001运行记录](递归测试_001运行记录.md) — 首次测试: 终端启动成功，焦点/窗口遮挡问题
+- [递归测试001结果](递归测试_结果.md) — 概念验证成功！新 Claude 启动+收到 prompt+调用 Lobster，卡在权限审批
+- [递归测试改进方向](递归测试_改进方向.md) — 强制 MCP 路径（免权限）+ 设计只有 Lobster 能做的任务
