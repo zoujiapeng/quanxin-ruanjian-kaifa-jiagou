@@ -1,8 +1,22 @@
 """
-定时条件功能注册（待完善）
-等待文件 / 进程 / 网络 / 时间 / 倒计时
+定时条件功能
+等待文件 / 进程 / 网络 / 时间 / 倒计时 — 轮询检测引擎
 """
+import time
+import os
+from datetime import datetime, timedelta
+
 from features.registry import feature, P, TC, FeatureCategory as F
+
+
+def _poll(condition_fn, timeout: float, interval: float = 0.5) -> bool:
+    """通用轮询：每 interval 秒检查一次 condition_fn，直到超时"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if condition_fn():
+            return True
+        time.sleep(interval)
+    return condition_fn()  # 最后再试一次
 
 
 @feature(
@@ -16,10 +30,16 @@ from features.registry import feature, P, TC, FeatureCategory as F
         P("wait_delete", "boolean", "是否等待文件删除而非创建", required=False, default=False),
     ],
     returns="bool - 是否在规定时间内检测到",
-    tags=["待完善"],
+    tags=["timer", "control"],
 )
-def timer_wait_file(path: str, timeout: float = 60, wait_delete: bool = False) -> bool:
-    return {"implemented": False, "description": "等待文件出现或消失"}
+def timer_wait_file(path: str, timeout: float = 60, wait_delete: bool = False) -> dict:
+    exists = os.path.exists(path)
+    if wait_delete:
+        return {"success": True, "result": _poll(lambda: not os.path.exists(path), timeout)}
+    else:
+        if exists:
+            return {"success": True, "result": True}
+        return {"success": True, "result": _poll(lambda: os.path.exists(path), timeout)}
 
 
 @feature(
@@ -33,10 +53,34 @@ def timer_wait_file(path: str, timeout: float = 60, wait_delete: bool = False) -
         P("wait_exit", "boolean", "是否等待进程退出而非启动", required=False, default=False),
     ],
     returns="bool - 是否在规定时间内检测到",
-    tags=["待完善"],
+    tags=["timer", "control"],
 )
-def timer_wait_process(name: str, timeout: float = 60, wait_exit: bool = False) -> bool:
-    return {"implemented": False, "description": "等待进程启动或退出"}
+def timer_wait_process(name: str, timeout: float = 60, wait_exit: bool = False) -> dict:
+    def process_running():
+        try:
+            import psutil
+            for proc in psutil.process_iter(["name"]):
+                try:
+                    if proc.info["name"] and name.lower() in proc.info["name"].lower():
+                        return True
+                except Exception:
+                    pass
+            return False
+        except ImportError:
+            # fallback: tasklist
+            import subprocess
+            try:
+                output = subprocess.check_output(
+                    f"tasklist /fi \"IMAGENAME eq {name}\"", shell=True, timeout=5
+                ).decode("utf-8", errors="replace")
+                return name.lower() in output.lower()
+            except Exception:
+                return False
+
+    if wait_exit:
+        return {"success": True, "result": not _poll(process_running, timeout)}
+    else:
+        return {"success": True, "result": _poll(process_running, timeout)}
 
 
 @feature(
@@ -49,10 +93,21 @@ def timer_wait_process(name: str, timeout: float = 60, wait_exit: bool = False) 
         P("wait_disconnect", "boolean", "是否等待断开而非连接", required=False, default=False),
     ],
     returns="bool - 是否在规定时间内达到目标状态",
-    tags=["待完善"],
+    tags=["timer", "control"],
 )
-def timer_wait_network(timeout: float = 30, wait_disconnect: bool = False) -> bool:
-    return {"implemented": False, "description": "等待网络连接或断开"}
+def timer_wait_network(timeout: float = 30, wait_disconnect: bool = False) -> dict:
+    def has_connection():
+        try:
+            import socket
+            socket.create_connection(("8.8.8.8", 53), timeout=2).close()
+            return True
+        except Exception:
+            return False
+
+    if wait_disconnect:
+        return {"success": True, "result": _poll(lambda: not has_connection(), timeout)}
+    else:
+        return {"success": True, "result": _poll(has_connection, timeout)}
 
 
 @feature(
@@ -64,10 +119,22 @@ def timer_wait_network(timeout: float = 30, wait_disconnect: bool = False) -> bo
         P("target", "str", "目标时间 HH:MM 或 HH:MM:SS 格式", example="14:30"),
     ],
     returns="bool - 是否到达指定时间",
-    tags=["待完善"],
+    tags=["timer", "control"],
 )
-def timer_wait_time(target: str) -> bool:
-    return {"implemented": False, "description": "等待到指定时间"}
+def timer_wait_time(target: str) -> dict:
+    try:
+        parts = target.strip().split(":")
+        h, m = int(parts[0]), int(parts[1])
+        s = int(parts[2]) if len(parts) > 2 else 0
+        now = datetime.now()
+        target_dt = now.replace(hour=h, minute=m, second=s, microsecond=0)
+        if target_dt <= now:
+            target_dt += timedelta(days=1)  # 如果今天已过，等明天
+        wait_sec = (target_dt - now).total_seconds()
+        time.sleep(wait_sec)
+        return {"success": True, "result": True}
+    except Exception as e:
+        return {"success": False, "error": f"时间格式错误: {e}"}
 
 
 @feature(
@@ -79,7 +146,24 @@ def timer_wait_time(target: str) -> bool:
         P("seconds", "number", "等待秒数", example=5),
     ],
     returns="bool - 是否完整等待完毕（False 表示被取消）",
-    tags=["待完善"],
+    tags=["timer", "control"],
 )
-def timer_countdown(seconds: float) -> bool:
-    return {"implemented": False, "description": "倒计时等待"}
+def timer_countdown(seconds: float) -> dict:
+    import threading
+    cancelled = threading.Event()
+
+    def check_cancel():
+        # 可以通过检查某个共享状态来支持取消
+        pass
+
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        remain = deadline - time.time()
+        if remain <= 0:
+            break
+        time.sleep(min(remain, 0.5))
+        check_cancel()
+        if cancelled.is_set():
+            return {"success": True, "result": False}
+
+    return {"success": True, "result": True}

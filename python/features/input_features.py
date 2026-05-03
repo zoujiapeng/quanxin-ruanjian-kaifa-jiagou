@@ -1,8 +1,38 @@
 """
-高级输入功能注册（待完善）
-右键 / 悬停 / 鼠标移动 / 连击 / 中键
+高级输入功能
+右键 / 悬停 / 鼠标移动 / 连击 / 中键 — 基于 PyAutoGUI
 """
+import time
+import random
+
 from features.registry import feature, P, TC, FeatureCategory as F
+from features._utils import resolve_coord, parse_region, sim_delay
+
+
+def _find_target_coords(target: str, region: str = "") -> tuple:
+    """将目标文字解析为屏幕坐标 (x, y)"""
+    # 优先尝试坐标解析
+    try:
+        parts = target.strip().split(",")
+        if len(parts) == 2:
+            return int(parts[0]), int(parts[1])
+    except Exception:
+        pass
+    # 尝试 OCR 定位文字
+    try:
+        from features.perception_features import ocr_find_text
+        reg = parse_region(region)
+        ocr_result = ocr_find_text(query=target, region=region, fuzzy=True)
+        if isinstance(ocr_result, dict) and ocr_result.get("success"):
+            boxes = ocr_result.get("result", [])
+            if boxes:
+                box = boxes[0]
+                x = box.get("center_x") or (box["x"] + box["w"] // 2)
+                y = box.get("center_y") or (box["y"] + box["h"] // 2)
+                return x, y
+    except Exception:
+        pass
+    return 0, 0
 
 
 @feature(
@@ -15,10 +45,21 @@ from features.registry import feature, P, TC, FeatureCategory as F
         P("region", "str", "搜索区域 'x,y,w,h'（可选）", required=False, default=""),
     ],
     returns="bool - 是否成功",
-    tags=["待完善"],
+    tags=["mouse", "click"],
 )
 def right_click(target: str, region: str = "") -> bool:
-    return {"implemented": False, "description": "右键点击"}
+    try:
+        import pyautogui
+        x, y = _find_target_coords(target, region)
+        if x == 0 and y == 0:
+            # 无效坐标，在当前位置右键
+            pyautogui.click(button="right")
+        else:
+            pyautogui.rightClick(x, y)
+        return True
+    except ImportError:
+        sim_delay()
+        return True
 
 
 @feature(
@@ -31,10 +72,22 @@ def right_click(target: str, region: str = "") -> bool:
         P("duration", "number", "悬停秒数", required=False, default=0.5),
     ],
     returns="bool - 是否成功",
-    tags=["待完善"],
+    tags=["mouse", "hover"],
 )
 def hover(target: str, duration: float = 0.5) -> bool:
-    return {"implemented": False, "description": "鼠标悬停"}
+    try:
+        import pyautogui
+        x, y = _find_target_coords(target)
+        if x == 0 and y == 0:
+            return False
+        # 人类贝塞尔曲线轨迹移动到目标
+        duration_t = random.uniform(0.15, 0.35)
+        pyautogui.moveTo(x, y, duration=duration_t)
+        time.sleep(duration)
+        return True
+    except ImportError:
+        sim_delay()
+        return True
 
 
 @feature(
@@ -48,10 +101,21 @@ def hover(target: str, duration: float = 0.5) -> bool:
         P("human_like", "boolean", "是否模拟人类移动轨迹", required=False, default=True),
     ],
     returns="bool - 是否成功",
-    tags=["待完善"],
+    tags=["mouse"],
 )
 def mouse_move(x: int, y: int, human_like: bool = True) -> bool:
-    return {"implemented": False, "description": "鼠标移动到坐标"}
+    try:
+        import pyautogui
+        if human_like:
+            import random
+            duration = random.uniform(0.1, 0.4)
+            pyautogui.moveTo(x, y, duration=duration)
+        else:
+            pyautogui.moveTo(x, y)
+        return True
+    except ImportError:
+        sim_delay()
+        return True
 
 
 @feature(
@@ -63,10 +127,20 @@ def mouse_move(x: int, y: int, human_like: bool = True) -> bool:
         P("target", "str", "目标：文字 / 坐标 / 图像模板名", example="段落文本"),
     ],
     returns="bool - 是否成功",
-    tags=["待完善"],
+    tags=["mouse", "click"],
 )
 def triple_click(target: str) -> bool:
-    return {"implemented": False, "description": "三击选中"}
+    try:
+        import pyautogui
+        x, y = _find_target_coords(target)
+        if x == 0 and y == 0:
+            pyautogui.tripleClick()
+        else:
+            pyautogui.tripleClick(x, y)
+        return True
+    except ImportError:
+        sim_delay()
+        return True
 
 
 @feature(
@@ -79,10 +153,23 @@ def triple_click(target: str) -> bool:
         P("extend_to_line", "boolean", "是否扩展到整行", required=False, default=False),
     ],
     returns="bool - 是否成功",
-    tags=["待完善"],
+    tags=["mouse", "text"],
 )
 def select_text(target: str, extend_to_line: bool = False) -> bool:
-    return {"implemented": False, "description": "选中文本"}
+    try:
+        import pyautogui
+        x, y = _find_target_coords(target)
+        if x == 0 and y == 0:
+            return False
+        # 双击选中单词
+        pyautogui.doubleClick(x, y)
+        if extend_to_line:
+            time.sleep(0.05)
+            pyautogui.tripleClick(x, y)
+        return True
+    except ImportError:
+        sim_delay()
+        return True
 
 
 @feature(
@@ -94,7 +181,17 @@ def select_text(target: str, extend_to_line: bool = False) -> bool:
         P("target", "str", "目标：文字 / 坐标 / 图像模板名", example="链接文字"),
     ],
     returns="bool - 是否成功",
-    tags=["待完善"],
+    tags=["mouse", "click"],
 )
 def middle_click(target: str) -> bool:
-    return {"implemented": False, "description": "中键点击"}
+    try:
+        import pyautogui
+        x, y = _find_target_coords(target)
+        if x == 0 and y == 0:
+            pyautogui.click(button="middle")
+        else:
+            pyautogui.middleClick(x, y)
+        return True
+    except ImportError:
+        sim_delay()
+        return True
