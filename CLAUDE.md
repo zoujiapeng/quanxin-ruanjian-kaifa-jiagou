@@ -1,21 +1,75 @@
-# Lobster — Claude Code 调试指南
+# Lobster — Claude Code 的"双手"
 
-> 本文件指导 Claude Code 如何自主调试、扩展和测试系统。
+> Lobster 是 Claude Code 的执行层扩展。MCP 是唯一的交互接口。
+> Claude Code 负责规划，Lobster 负责执行——循环/等待/重试在本地跑，不消耗 token。
+
+## 核心哲学
+
+**Lobster 的存在是为了让 Claude Code 能做到原本做不到的事：**
+
+1. **免 Token 执行** — LOOP/WAIT/IF 等控制流在本地引擎跑，Claude Code 只生成一次 DSL，后续迭代不消耗 API token
+2. **GUI 操作** — Claude Code 读不了屏幕、点不了按钮、拖不动窗口，Lobster 通过 OCR+图像识别+模拟输入补全这些能力
+3. **指令库组合** — 核心能力不是单个功能，而是如何组合。Claude Code 应能自主规划拆解任务 → 选择合适的工具链 → 编排执行
+4. **MCP 是唯一接口** — Claude Code 通过 `tools/list` 发现能力、`tools/call` 调用能力。工具的描述和参数设计必须对 Claude Code 极度友好（清晰语义、完备 example、合理粒度）
+
+**优先级**: 架构扩展性 > 工具数量。组合框架必须先完备（已有 @feature + LOOP/IF/WAIT），工具库慢慢积累。
 
 ## 系统架构
 
 ```
-功能注册 (python/features/*.py)
-    │
-    ├── @feature(...) 装饰器 → registry
-    │
-    ├── registry.export_mcp_tools()  → MCP Server 自动提供
-    ├── /api/feature/<name>          → HTTP API 自动可用
-    ├── lobster call <name>          → CLI 自动注册
-    └── DSL keyword                  → DSL 解析器识别
+Claude Code (规划层)
+    │  MCP protocol (tools/list → tools/call)
+    ▼
+Lobster MCP Server (python/mcp/server.py)
+    │  @feature() registry
+    ▼
+本地执行引擎 (DSL → AST → 状态机)
+    │  LOOP / WAIT / IF 控制流 (免token)
+    ▼
+感知层 (OCR/图像/颜色) + 交互层 (鼠标/键盘/窗口)
 ```
 
-**核心原则**: 新增功能只改一个文件，其他全部自动同步。
+**设计原则**: 新增功能只改一个文件（`@feature()` 装饰器），MCP/CLI/HTTP/DSL 全部自动同步。
+
+## 指令库组合模式
+
+Claude Code 收到任务后应自主规划工具链。以下是对应常见任务的组合模式：
+
+### 模式 1: 感知→动作→验证
+```
+OCR查找文字 → CLICK点击 → WAIT反馈 → OCR验证结果
+```
+**适用**: 表单填写、按钮点击、弹窗处理。`ocr_find_text` 定位坐标 → `click_target` 点击 → `popup_close` / `ocr_find_text` 验证。
+
+### 模式 2: 循环监控（免token）
+```
+LOOP 检查
+  color_check / detect_color / detect_progress → 检测状态
+  WAIT 变化 / WAIT 稳定 → 等待条件
+  IF 条件 → CLICK / TYPE / DRAG → 执行动作
+END
+```
+**适用**: 等待进度条完成、监控页面变化、自动化流水线。DSL 一次性生成后本地引擎循环，不消耗 token。
+
+### 模式 3: 多步流程编排
+```
+find_image (定位模板) → click_target (点击) → ocr_extract_all (提取文字)
+→ ai_generate_dsl (分析结果并生成下一步) → DSL执行
+```
+**适用**: 复杂任务中 AI 需要阅读屏幕内容后决策的场景。
+
+### 模式 4: 调试诊断
+```
+debug_system_info → debug_run_tests → debug_get_logs → debug_validate_dsl
+```
+**适用**: 系统出问题时先检查状态，再跑测试，看日志，验证 DSL。
+
+### 如何选择工具
+- `detect_process` / `find_processes` — 检查目标软件是否运行
+- `focus_window` — 切换到目标窗口后再操作
+- `type_clipboard` — 替代 `type_text`，绕过输入法问题
+- `screenshot` + `ocr_*` — 检验操作结果
+- `hotkey` — 需要系统级快捷键时用
 
 ## 调试流程
 
