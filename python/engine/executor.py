@@ -67,6 +67,12 @@ class DSLExecutor:
         self._scope_stack: list[dict[str, Any]] = [{}]  # 作用域链
         self._call_depth = 0
 
+        # 线程安全
+        self._action_lock = threading.Lock()
+
+        # 异质执行：handler 注册表
+        self._handlers: dict[str, Any] = {"default": self._action_handler}
+
         # 事件回调
         self._callbacks: Dict[str, list[Callable]] = {
             "node_start": [],
@@ -162,6 +168,10 @@ class DSLExecutor:
     def on(self, event: str, callback: Callable):
         self._callbacks[event].append(callback)
 
+    def register_handler(self, name: str, handler: Callable):
+        """注册异质执行 handler，可在 WITH <name> 中使用"""
+        self._handlers[name] = handler
+
     def _emit(self, event: str, **kwargs):
         for cb in self._callbacks.get(event, []):
             try:
@@ -224,6 +234,9 @@ class DSLExecutor:
 
         elif node.type == NodeType.PARALLEL:
             self._exec_parallel(node, ctx)
+
+        elif node.type == NodeType.WITH:
+            self._exec_with(node, ctx)
 
         # SUBROUTINE 定义直接跳过（已在 parser 注册）
 
@@ -341,6 +354,25 @@ class DSLExecutor:
         for child in node.children:
             self._execute_node(child, ctx)
 
+    def _exec_with(self, node: ASTNode, ctx: ExecutionContext):
+        """WITH <handler_name> 异质执行：临时切换 action_handler"""
+        handler_name = node.args
+        handler = self._handlers.get(handler_name)
+        if handler is None:
+            self._log(f"  [WITH] 未知 handler '{handler_name}'，使用默认")
+            for child in node.children:
+                self._execute_node(child, ctx)
+        else:
+            old_handler = self._action_handler
+            self._action_handler = handler
+            self._log(f"  [WITH] 切换 handler 到 '{handler_name}'")
+            try:
+                for child in node.children:
+                    self._execute_node(child, ctx)
+            finally:
+                self._action_handler = old_handler
+                self._log(f"  [WITH] 恢复 handler 到默认")
+
     def _exec_import(self, node: ASTNode, ctx: ExecutionContext):
         path = node.args
         if not os.path.isabs(path):
@@ -362,6 +394,7 @@ class DSLExecutor:
             engine = get_trigger_engine()
             if self._action_handler:
                 engine.set_action_handler(self._action_handler)
+            engine.set_executor(self)  # 传入 executor 引用，使触发器可复用 _execute_node
 
             event_key = node.event_key
             config_str = node.args
@@ -388,22 +421,23 @@ class DSLExecutor:
 
     # ── 动作调用 ─────────────────────────────────────────────────
     def _call_action(self, action: str, **kwargs) -> Any:
-        if self._action_handler is None:
-            self._log(f"  [模拟] {action}({kwargs})")
-            return True
-        retry_limit = kwargs.pop("retry_limit", 3)
-        ctx = kwargs.pop("ctx", None)
-        retry_limit = ctx.retry_limit if ctx else retry_limit
-        last_err = None
-        for attempt in range(1, retry_limit + 1):
-            try:
-                return self._action_handler(action, **kwargs)
-            except Exception as e:
-                last_err = e
-                self._log(f"  [重试 {attempt}/{retry_limit}] {action} 失败: {e}")
-                time.sleep(0.5 * attempt)
-        # 所有重试失败 → 启动自愈管道
-        return self._heal_action(action, kwargs, last_err, ctx)
+        with self._action_lock:
+            if self._action_handler is None:
+                self._log(f"  [模拟] {action}({kwargs})")
+                return True
+            retry_limit = kwargs.pop("retry_limit", 3)
+            ctx = kwargs.pop("ctx", None)
+            retry_limit = ctx.retry_limit if ctx else retry_limit
+            last_err = None
+            for attempt in range(1, retry_limit + 1):
+                try:
+                    return self._action_handler(action, **kwargs)
+                except Exception as e:
+                    last_err = e
+                    self._log(f"  [重试 {attempt}/{retry_limit}] {action} 失败: {e}")
+                    time.sleep(0.5 * attempt)
+            # 所有重试失败 → 启动自愈管道
+            return self._heal_action(action, kwargs, last_err, ctx)
 
     def _heal_action(self, action: str, context: dict, error: Exception,
                      ctx: Optional[ExecutionContext]) -> Any:

@@ -63,3 +63,34 @@ def run_dsl(dsl: str, task_id: str = "", max_loops: int = 100, timeout: float = 
 def run_dsl_sync(dsl: str, max_loops: int = 10, retry_limit: int = 1, timeout: float = 30) -> dict:
     """由 engine/executor.py 实际执行，此函数仅占位"""
     raise RuntimeError("run_dsl_sync 需要通过 executor 执行，不能直接调用 handler")
+
+
+@feature(
+    name="dsl_optimize_analyze",
+    display_name="DSL 优化分析",
+    description="【Telemetry 驱动】分析功能调用 telemetry 数据，自动给出优化建议（超时调整、替代功能、失败模式）。适用于：性能调优和可靠性改进",
+    category=F.DEBUG,
+    params=[
+        P("feature", "str", "功能名（可选，默认分析全部）", required=False, default=""),
+    ],
+    returns="dict{overall, suggestions, failure_patterns} - 优化分析报告",
+    dsl_keyword=None,
+    tags=["telemetry", "optimizer", "debug"],
+)
+def dsl_optimize_analyze(feature: str = "") -> dict:
+    """分析 telemetry 数据并返回优化建议"""
+    try:
+        from engine.optimizer import TelemetryAnalyzer
+        analyzer = TelemetryAnalyzer()
+        result = {}
+        if feature:
+            result["feature_analysis"] = analyzer.analyze_feature(feature)
+        else:
+            result["analysis"] = analyzer.analyze_all()
+            result["suggestions"] = analyzer.suggest_optimizations()
+            result["failure_patterns"] = analyzer.detect_failure_patterns()
+        return result
+    except ImportError as e:
+        return {"success": False, "error": f"Optimizer 不可用: {e}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

@@ -96,11 +96,16 @@ class TriggerEngine:
 
     def __init__(self):
         self._action_handler = None
+        self._executor = None  # DSLExecutor 引用，由 set_executor 设置
         self._instance_counter = 0
         self._instance_lock = threading.Lock()
 
     def set_action_handler(self, handler):
         self._action_handler = handler
+
+    def set_executor(self, executor):
+        """设置 DSLExecutor 引用，用于 handler 动作执行"""
+        self._executor = executor
 
     def register(self, spec_name: str, config: dict,
                  handler_actions: list) -> TriggerInstance:
@@ -158,30 +163,38 @@ class TriggerEngine:
 
     def _execute_handler(self, inst: TriggerInstance):
         """当触发器条件满足时，执行 handler 动作序列"""
-        handler = self._action_handler
-        if not handler:
+        if self._executor:
+            from engine.executor import ExecutionContext
+            ctx = ExecutionContext(max_loops=10, timeout=30)
+            for node in inst.handler_actions:
+                try:
+                    self._executor._execute_node(node, ctx)
+                except Exception as e:
+                    logger.error(f"[trigger] handler 执行失败: {e}")
+        elif self._action_handler:
+            logger.info(f"[trigger] 触发 {inst.id} (无 executor，使用直接 handler)")
+            # 简单降级：直接调用 action_handler 处理基本节点
+            self._execute_handler_direct(inst)
+        else:
             logger.info(f"[trigger] 触发 {inst.id} (模拟模式，不执行)")
-            return
 
+    def _execute_handler_direct(self, inst: TriggerInstance):
+        """降级方案：没有 executor 时直接调用 action_handler"""
+        from engine.dsl_parser import NodeType
         for node in inst.handler_actions:
             try:
-                self._execute_node(node, handler)
+                nt = node.type
+                if nt == NodeType.SEQUENCE:
+                    for c in node.children:
+                        self._action_handler("click", target=c.args)
+                elif nt == NodeType.CLICK:
+                    self._action_handler("click", target=node.args)
+                elif nt == NodeType.WAIT:
+                    self._action_handler("wait", condition=node.args, timeout=10)
+                elif nt == NodeType.TYPE:
+                    self._action_handler("type", text=node.args)
             except Exception as e:
-                logger.error(f"[trigger] handler 执行失败: {e}")
-
-    def _execute_node(self, node, handler):
-        """递归执行 handler AST 节点"""
-        from engine.dsl_parser import NodeType
-        nt = node.type
-        if nt == NodeType.SEQUENCE:
-            for c in node.children:
-                self._execute_node(c, handler)
-        elif nt == NodeType.CLICK:
-            handler("click", target=node.args)
-        elif nt == NodeType.WAIT:
-            handler("wait", condition=node.args, timeout=10)
-        elif nt == NodeType.TYPE:
-            handler("type", text=node.args)
+                logger.error(f"[trigger] handler 直接执行失败: {e}")
 
     def stop(self, instance_id: str) -> bool:
         """停止一个触发器实例"""

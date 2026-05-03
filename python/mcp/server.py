@@ -8,7 +8,7 @@ Lobster MCP Server v2 — 自给自足版
 - 后端可用时自动代理其余功能，不可用时降级
 """
 from __future__ import annotations
-import json, os, sys, time, traceback
+import json, os, sys, time, traceback, threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -169,6 +169,72 @@ def _build_tools_list() -> list[dict]:
 
 # ── MCP stdio 协议 ────────────────────────────────────────────────
 
+_stdout_lock = threading.Lock()
+_notification_queue: "queue.Queue" = None
+_notification_thread = None
+_notification_stop = threading.Event()
+
+
+def _write_message(msg: dict):
+    """线程安全的 stdout 写入"""
+    payload = json.dumps(msg, ensure_ascii=False)
+    data = f"Content-Length: {len(payload.encode('utf-8'))}\r\n\r\n{payload}"
+    with _stdout_lock:
+        sys.stdout.write(data)
+        sys.stdout.flush()
+
+
+def _send_notification(method: str, params: dict):
+    """发送 JSON-RPC notification（无 id，不期望响应）"""
+    _write_message({"jsonrpc": "2.0", "method": method, "params": params})
+
+
+def _notification_worker():
+    """后台线程：从队列取通知并发送"""
+    import queue
+    while not _notification_stop.is_set():
+        try:
+            method, params = _notification_queue.get(timeout=0.5)
+            _send_notification(method, params)
+        except queue.Empty:
+            continue
+        except Exception:
+            pass
+
+
+def _start_notifications():
+    """启动通知后台线程"""
+    global _notification_queue, _notification_thread, _notification_stop
+    import queue
+    _notification_queue = queue.Queue()
+    _notification_stop.clear()
+    _notification_thread = threading.Thread(
+        target=_notification_worker, daemon=True,
+        name="mcp-notifications",
+    )
+    _notification_thread.start()
+
+
+def _stop_notifications():
+    """停止通知后台线程"""
+    if _notification_stop:
+        _notification_stop.set()
+
+
+def _setup_notification_handlers(executor):
+    """注册 executor 事件回调，转发为 MCP 通知"""
+    def notify(event_type, **kw):
+        if _notification_queue is not None:
+            _notification_queue.put(("notifications/message", {
+                "type": event_type,
+                "data": kw,
+            }))
+    executor.on("node_start", lambda **kw: notify("node_start", **kw))
+    executor.on("node_done", lambda **kw: notify("node_done", **kw))
+    executor.on("error", lambda **kw: notify("error", **kw))
+    executor.on("state_change", lambda **kw: notify("state_change", **kw))
+    executor.on("log", lambda **kw: notify("log", **kw))
+
 def _read_message() -> dict | None:
     content_length = 0
     while True:
@@ -195,10 +261,7 @@ def _read_message() -> dict | None:
 
 
 def _send_message(msg: dict):
-    payload = json.dumps(msg, ensure_ascii=False)
-    data = f"Content-Length: {len(payload.encode('utf-8'))}\r\n\r\n{payload}"
-    sys.stdout.write(data)
-    sys.stdout.flush()
+    _write_message(msg)
 
 
 def uuid4_short() -> str:
@@ -210,6 +273,10 @@ def uuid4_short() -> str:
 def serve():
     """主循环"""
     tools_cache = None
+
+    # 启动后台通知
+    _start_notifications()
+    _setup_notification_handlers(_executor)
 
     while True:
         msg = _read_message()

@@ -135,8 +135,6 @@ class DSLParser:
                 break
             if keyword == "ELSE":
                 break
-            if keyword == "WITH":
-                break
             self._consume()
 
             if keyword == "CLICK":
@@ -198,21 +196,73 @@ class DSLParser:
                 self._expect("END", lineno)
                 nodes.append(node)
 
-            elif keyword == "PARALLEL":
-                node = ASTNode(NodeType.PARALLEL, args, line=lineno)
-                # 第一个分支
-                branch = self._parse_block({"END", "WITH"})
-                node.children.append(ASTNode(NodeType.SEQUENCE, "branch_0", line=lineno, children=branch))
-                # 后续 WITH 分支
-                while self._peek() and self._peek()[1] == "WITH":
-                    self._consume()
-                    branch = self._parse_block({"END", "WITH"})
-                    idx = len(node.children)
-                    node.children.append(ASTNode(NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=branch))
+            elif keyword == "WITH":
+                node = ASTNode(NodeType.WITH, args, line=lineno)
+                node.children = self._parse_block({"END"})
                 self._expect("END", lineno)
                 nodes.append(node)
 
+            elif keyword == "PARALLEL":
+                node = ASTNode(NodeType.PARALLEL, args, line=lineno)
+                # 专用分支解析：WITH 在此处是分支分隔符，不是块语句
+                self._parse_parallel_branches(node, lineno)
+                nodes.append(node)
+
         return nodes
+
+    def _parse_parallel_branches(self, node: ASTNode, ref_line: int):
+        """解析 PARALLEL 分支：WITH 是分支分隔符，每段是一个 SEQUENCE"""
+        current_branch = []
+        while self._pos < len(self._tokens):
+            tok = self._peek()
+            if tok is None:
+                break
+            lineno, keyword, args = tok
+            if keyword == "END":
+                self._consume()
+                break
+            if keyword == "WITH":
+                self._consume()
+                if current_branch:
+                    idx = len(node.children)
+                    node.children.append(ASTNode(NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=current_branch))
+                    current_branch = []
+                continue
+            # 解析单条语句
+            self._consume()
+            if keyword == "CLICK":
+                current_branch.append(ASTNode(NodeType.CLICK, args, line=lineno))
+            elif keyword == "WAIT":
+                current_branch.append(ASTNode(NodeType.WAIT, args, line=lineno))
+            elif keyword == "RUN":
+                current_branch.append(ASTNode(NodeType.RUN, args, line=lineno))
+            elif keyword == "LOOP":
+                child = ASTNode(NodeType.LOOP, args, line=lineno)
+                child.children = self._parse_block({"END"})
+                self._expect("END", lineno)
+                current_branch.append(child)
+            elif keyword == "IF":
+                child = ASTNode(NodeType.IF, args, line=lineno)
+                child.children = self._parse_block({"END", "ELSE"})
+                nxt = self._peek()
+                if nxt and nxt[1] == "ELSE":
+                    self._consume()
+                    child.else_children = self._parse_block({"END"})
+                self._expect("END", lineno)
+                current_branch.append(child)
+            elif keyword == "CALL":
+                name, call_args = self._parse_call_expr(args, lineno)
+                child = ASTNode(NodeType.CALL, name, line=lineno)
+                child.call_args = call_args
+                current_branch.append(child)
+            else:
+                raise DSLParseError(f"PARALLEL 中不支持 '{keyword}'", lineno)
+        # 保存最后一个分支
+        if current_branch:
+            idx = len(node.children)
+            node.children.append(ASTNode(NodeType.SEQUENCE, f"branch_{idx}", line=lineno, children=current_branch))
+        if not node.children:
+            raise DSLParseError("PARALLEL 块不能为空", ref_line)
 
     def _expect(self, keyword: str, ref_line: int):
         tok = self._peek()

@@ -7,8 +7,11 @@ import json
 import os
 import time
 import base64
+import uuid
 from typing import Any, Optional
 from dataclasses import dataclass, field
+
+from engine.store import get_store, Checkpoint
 
 
 @dataclass
@@ -44,6 +47,7 @@ class Planner:
         self._steps: list[PlanStep] = []
         self._max_iterations = 10
         self._client = None
+        self._task_id = ""
 
     def _ensure_client(self):
         if self._client is None and self._api_key:
@@ -75,6 +79,7 @@ class Planner:
         self._steps = []
         self._max_iterations = max_iterations
         self._ensure_client()
+        self._task_id = uuid.uuid4().hex[:12]
 
         if not self._client:
             return {
@@ -101,6 +106,7 @@ class Planner:
                 break
 
             if plan.get("done"):
+                self._save_checkpoint(iteration, state, "completed")
                 return self._result(success=True, message=plan.get("reason", "目标完成"))
 
             # 3. 执行
@@ -123,14 +129,81 @@ class Planner:
                 "result": str(step.result)[:200] if step.result else None,
             })
 
+            # 保存 checkpoint
+            self._save_checkpoint(iteration, state, "running")
+
             # 5. 检查致命错误
             if step_result.get("error") and "无法恢复" in str(step_result.get("error", "")):
+                self._save_checkpoint(iteration, state, "error")
                 return self._result(success=False, error=step_result["error"])
 
+        self._save_checkpoint(max_iterations, state, "finished")
         return self._result(
             success=False,
             error=f"超过最大迭代次数 ({max_iterations})",
         )
+
+    # ── 持久化 ────────────────────────────────────────────────────
+
+    def _save_checkpoint(self, iteration: int, state: dict, status: str):
+        """保存当前规划状态到 store"""
+        try:
+            store = get_store()
+            cp = Checkpoint(
+                task_id=self._task_id,
+                dsl=f"planner:{state.get('goal', '')[:100]}",
+                state=status,
+                completed_indices=list(range(len(self._steps))),
+                variables={
+                    "goal": state.get("goal", ""),
+                    "context": state.get("context", {}),
+                    "iteration": iteration,
+                    "steps": [
+                        {"action": s.action, "params": s.params,
+                         "error": s.error, "elapsed_ms": s.elapsed_ms}
+                        for s in self._steps
+                    ],
+                    "last_observation": state.get("last_observation", ""),
+                },
+                scope_count=1,
+                node_info=f"planner iteration {iteration}/{self._max_iterations}",
+            )
+            store.save_checkpoint(cp)
+        except Exception as e:
+            pass  # checkpoint 失败不阻塞主流程
+
+    def restore_session(self, task_id: str) -> Optional[dict]:
+        """从 store 恢复之前中断的规划 session
+
+        Args:
+            task_id: checkpoint 的 task_id
+
+        Returns:
+            dict{goal, steps, iteration, last_observation} 或 None
+        """
+        try:
+            store = get_store()
+            cp = store.get_checkpoint(task_id)
+            if cp is None:
+                return None
+            self._task_id = task_id
+            variables = cp.variables
+            self._steps = [
+                PlanStep(action=s["action"], params=s["params"],
+                         error=s.get("error", ""), elapsed_ms=s.get("elapsed_ms", 0))
+                for s in variables.get("steps", [])
+            ]
+            return {
+                "goal": variables.get("goal", ""),
+                "context": variables.get("context", {}),
+                "steps": variables.get("steps", []),
+                "iteration": variables.get("iteration", 0),
+                "last_observation": variables.get("last_observation", ""),
+                "task_id": task_id,
+                "state": cp.state,
+            }
+        except Exception as e:
+            return None
 
     # ── 内部步骤 ────────────────────────────────────────────────
 

@@ -58,14 +58,15 @@ CORS(app, origins="*")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 executor = DSLExecutor(action_handler=action_handler)
 scheduler = TaskScheduler(executor)
+_current_dsl = ""  # 当前加载的 DSL，供热重载使用
 
 
 def broadcast(event, data):
     socketio.emit(event, data)
 
 
-executor.on("node_start",     lambda **kw: broadcast("node_start", kw))
-executor.on("node_done",      lambda **kw: broadcast("node_done", kw))
+executor.on("node_start",     lambda **kw: broadcast("node_highlight", {"event": "start", **kw}))
+executor.on("node_done",      lambda **kw: broadcast("node_highlight", {"event": "done", **kw}))
 executor.on("error",          lambda **kw: broadcast("exec_error", kw))
 executor.on("state_change",   lambda **kw: broadcast("state_change", kw))
 executor.on("log",            lambda **kw: (push_log(kw.get("message", "")), broadcast("log", kw))[1])
@@ -147,10 +148,12 @@ def run_dsl():
 
 @app.route("/api/dsl/run-sync", methods=["POST"])
 def run_dsl_sync():
+    global _current_dsl
     data = request.get_json(force=True, silent=True) or {}
     source = data.get("dsl", "")
     if not source.strip():
         return jsonify({"success": False, "error": "DSL 内容为空"}), 400
+    _current_dsl = source
     start = time.time()
     try:
         DSLParser.from_string(source)
@@ -205,6 +208,16 @@ def status():
     })
 
 
+@app.route("/api/dsl/state")
+def dsl_state():
+    """返回当前 DSL 状态（供热重载前端使用）"""
+    return jsonify({
+        "dsl": _current_dsl,
+        "executor_state": executor.state.value,
+        "features": len(registry.all()),
+    })
+
+
 # ── WebSocket ────────────────────────────────────────────────────
 @socketio.on("connect")
 def on_connect():
@@ -229,6 +242,49 @@ def on_run_dsl(data):
 def on_call_feature(data):
     name = data.pop("feature", "")
     emit("feature_result", registry.execute(name, **data))
+
+
+@socketio.on("dsl_update")
+def on_dsl_update(data):
+    """DSL 热重载：客户端推送新 DSL，服务端解析校验并广播结果"""
+    global _current_dsl
+    dsl = data.get("dsl", "")
+    _current_dsl = dsl
+    try:
+        ast = DSLParser.from_string(dsl)
+        emit("dsl_update_ok", {
+            "dsl": dsl,
+            "ast": ast.to_dict(),
+            "node_count": _count_nodes(ast),
+        })
+        broadcast("dsl_updated", {"dsl": dsl, "node_count": _count_nodes(ast)})
+    except Exception as e:
+        emit("dsl_update_error", {"error": str(e), "dsl": dsl})
+
+
+@socketio.on("dsl_parse_validate")
+def on_dsl_parse_validate(data):
+    """DSL 解析校验：只解析不执行，返回 AST"""
+    dsl = data.get("dsl", "")
+    try:
+        ast = DSLParser.from_string(dsl)
+        emit("dsl_parse_result", {
+            "valid": True,
+            "ast": ast.to_dict(),
+            "node_count": _count_nodes(ast),
+        })
+    except Exception as e:
+        emit("dsl_parse_result", {"valid": False, "error": str(e)})
+
+
+def _count_nodes(node) -> int:
+    """递归计算 AST 节点数"""
+    count = 1
+    for child in getattr(node, "children", []):
+        count += _count_nodes(child)
+    for child in getattr(node, "else_children", []):
+        count += _count_nodes(child)
+    return count
 
 
 # ── 启动 ──────────────────────────────────────────────────────────
