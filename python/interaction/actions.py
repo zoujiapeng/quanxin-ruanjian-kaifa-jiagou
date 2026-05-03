@@ -307,6 +307,7 @@ class ActionHandler:
             "ocr_extract": self._handle_ocr_extract,
             "region_select": self._handle_region_select,
             "image_find": self._handle_image_find,
+            "image_click": self._handle_image_click,
             "template_capture": self._handle_template_capture,
         }
         handler = handlers.get(action)
@@ -417,6 +418,69 @@ class ActionHandler:
             return {"found": True, "center_x": cx, "center_y": cy,
                     "confidence": confidence, "template": template}
         return {"found": False, "template": template}
+
+    def _handle_image_click(self, targets: str = "", similarity: float = 0.9,
+                            method: str = "single", timeout: float = 5,
+                            region: str = "", offset_x: int = 0, offset_y: int = 0,
+                            match_all: bool = False, ctx=None, **_) -> dict:
+        """
+        多目标优先级图像匹配 + 点击。
+        targets: 逗号或空格分隔的模板名，按优先级排列
+        返回: {success, target, x, y, confidence}
+        """
+        import re
+        import pyautogui
+
+        if not targets:
+            return {"success": False, "error": "未指定目标模板"}
+
+        # 解析目标列表（逗号或空格分隔）
+        if "," in targets:
+            names = [t.strip() for t in targets.split(",") if t.strip()]
+        else:
+            names = targets.split()
+
+        if not names:
+            return {"success": False, "error": "目标列表为空"}
+
+        parsed_region = self._parse_region(region) if region else None
+        end_time = time.time() + timeout
+
+        for idx, name in enumerate(names):
+            elapsed = time.time()
+            if elapsed > end_time:
+                break
+
+            remaining = end_time - elapsed
+            self._log(f"  IMAGE_CLICK: 尝试 #{idx+1} '{name}' (剩{remaining:.0f}s)")
+
+            match = self.matcher.find(name, threshold=similarity, region=parsed_region)
+            if not match:
+                continue
+
+            (cx, cy), confidence = match
+            click_x = cx + offset_x
+            click_y = cy + offset_y
+
+            self._log(f"  找到 '{name}' @ ({cx},{cy}) conf={confidence:.0%} → 点击 ({click_x},{click_y}) [{method}]")
+            pyautogui.moveTo(click_x, click_y, duration=0.15)
+
+            if method == "right":
+                pyautogui.rightClick()
+            elif method == "double":
+                pyautogui.doubleClick()
+            else:
+                pyautogui.click()
+
+            return {
+                "success": True,
+                "target": name,
+                "x": click_x,
+                "y": click_y,
+                "confidence": float(confidence),
+            }
+
+        return {"success": False, "error": f"所有目标均未找到: {names}"}
 
     def _handle_template_capture(self, template_name: str, region: str = "", ctx=None, **_) -> dict:
         """从变量取区域截图存为模板文件"""

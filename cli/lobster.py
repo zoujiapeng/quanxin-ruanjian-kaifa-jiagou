@@ -196,10 +196,7 @@ def cmd_info(args):
     data = _req("get", f"/api/feature/{args[0]}") if False else None
     # 从注册表获取 (不需要后端)
     try:
-        import features.action_features  # noqa
-        import features.perception_features  # noqa
-        import features.ai_debug_features  # noqa
-        import features.system_features  # noqa
+        import features._all  # noqa
         from features.registry import registry
         spec = registry.get(args[0])
         if not spec:

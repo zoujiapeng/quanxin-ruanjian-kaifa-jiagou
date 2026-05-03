@@ -26,3 +26,4 @@ import features.ai_plan_features
 import features.plugin_features
 import features.browser_features
 import features.state
+import features.image_click_features

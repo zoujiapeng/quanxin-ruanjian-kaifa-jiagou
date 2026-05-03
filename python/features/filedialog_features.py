@@ -84,3 +84,63 @@ def filedialog_save(path: str, overwrite: bool = True, timeout: float = 10) -> d
 )
 def filedialog_folder(path: str, timeout: float = 10) -> dict:
     return {"success": True, "result": _type_path_and_confirm(path, timeout)}
+
+
+@feature(
+    name="select_images",
+    display_name="选择图片文件",
+    description="""【交互·文件】弹出原生 Windows 文件选择对话框让用户选择图片文件（png/jpg/bmp）。
+
+使用场景:
+  - 用户说"选一张图"时调用此工具
+  - 配合 IMAGE_CLICK 使用：选择图片 → 复制到模板目录 → 按名点击
+
+选择后自动复制到 templates/ 目录并返回模板名。""",
+    category=F.ACTION,
+    params=[
+        P("title", "str", "对话框标题", required=False, default="请选择图片文件"),
+        P("multi_select", "boolean", "是否允许多选", required=False, default=False),
+    ],
+    returns="dict{success, files: [{path, name, template_name}], cancelled}",
+)
+def select_images(title: str = "请选择图片文件", multi_select: bool = False) -> dict:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        import shutil, os
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+
+        filetypes = [("图片文件", "*.png *.jpg *.jpeg *.bmp"), ("所有文件", "*.*")]
+        if multi_select:
+            files = filedialog.askopenfilenames(title=title, filetypes=filetypes)
+        else:
+            files = filedialog.askopenfilename(title=title, filetypes=filetypes)
+
+        root.destroy()
+
+        if not files:
+            return {"success": True, "files": [], "cancelled": True}
+
+        # 复制到 templates/ 目录
+        template_dir = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "..", "templates"))
+        os.makedirs(template_dir, exist_ok=True)
+
+        result_files = []
+        for fp in files if isinstance(files, tuple) else [files]:
+            name = os.path.splitext(os.path.basename(fp))[0]
+            ext = os.path.splitext(fp)[1]
+            dest = os.path.join(template_dir, f"{name}{ext}")
+            shutil.copy2(fp, dest)
+            result_files.append({
+                "path": fp,
+                "name": name,
+                "template_name": name,
+            })
+
+        return {"success": True, "files": result_files, "cancelled": False}
+    except ImportError:
+        return {"success": False, "error": "tkinter 不可用"}

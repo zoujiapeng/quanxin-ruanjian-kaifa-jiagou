@@ -314,6 +314,9 @@ class DSLExecutor:
         elif node.type == NodeType.IMAGE_FIND:
             self._exec_image_find(node, ctx)
 
+        elif node.type == NodeType.IMAGE_CLICK:
+            self._exec_image_click(node, ctx)
+
         elif node.type == NodeType.TEMPLATE_CAPTURE:
             self._exec_template_capture(node, ctx)
 
@@ -510,6 +513,52 @@ class DSLExecutor:
             self._set_var("_image_y", result.get("center_y"))
             self._set_var("_image_confidence", result.get("confidence"))
         self._emit("node_done", node_type="IMAGE_FIND", args=args, line=node.line)
+
+    def _exec_image_click(self, node: ASTNode, ctx: ExecutionContext):
+        """
+        IMAGE_CLICK target1, target2 [sim=0.9] [method=right]
+        多目标优先级图像匹配 + 点击
+        """
+        args = self._interpolate(node.args)
+        self._emit("node_start", node_type="IMAGE_CLICK", args=args, line=node.line)
+        self._log(f"IMAGE_CLICK: {args}")
+
+        # 分离目标和选项: "icon_a, icon_b sim=0.85 method=right" → targets + kwargs
+        parts = args.split()
+        targets_str = ""
+        kwargs = {}
+        for p in parts:
+            if "=" in p:
+                k, v = p.split("=", 1)
+                kwargs[k.lower()] = v
+            else:
+                targets_str += " " + p if targets_str else p
+
+        if not targets_str:
+            self._log("IMAGE_CLICK: 需要至少一个模板名")
+            self._emit("node_done", node_type="IMAGE_CLICK", args="error", line=node.line)
+            return
+
+        # 调用 action handler
+        result = self._call_action(
+            "image_click",
+            targets=targets_str,
+            similarity=float(kwargs.get("sim", kwargs.get("similarity", 0.9))),
+            method=kwargs.get("method", "single"),
+            timeout=float(kwargs.get("timeout", 5)),
+            offset_x=int(kwargs.get("offset_x", 0)),
+            offset_y=int(kwargs.get("offset_y", 0)),
+            match_all=kwargs.get("match_all", "").lower() in ("true", "1"),
+        )
+
+        if isinstance(result, dict):
+            self._set_var("_click_success", result.get("success", False))
+            self._set_var("_click_target", result.get("target", ""))
+            self._set_var("_click_x", result.get("x"))
+            self._set_var("_click_y", result.get("y"))
+            self._set_var("_click_confidence", result.get("confidence"))
+
+        self._emit("node_done", node_type="IMAGE_CLICK", args=args, line=node.line)
 
     def _exec_template_capture(self, node: ASTNode, ctx: ExecutionContext):
         """TEMPLATE_CAPTURE var_name template_name — 从变量取区域截图存为模板"""
