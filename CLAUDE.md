@@ -71,6 +71,84 @@ debug_system_info → debug_run_tests → debug_get_logs → debug_validate_dsl
 - `screenshot` + `ocr_*` — 检验操作结果
 - `hotkey` — 需要系统级快捷键时用
 
+## 场景模板
+
+以下是一线可用的 prompt 模板，直接复制给 Claude Code 使用：
+
+### 模板 1: 跨应用数据搬运
+```
+用户需要从 [应用A] 复制数据到 [应用B]。
+流程: 
+1. 用 detect_process/find_processes 确认两个应用都在运行
+2. focus_window 切换到应用A
+3. 截图+OCR提取内容或用快捷键复制
+4. focus_window 切换到应用B
+5. CLICK/TYPE 粘贴数据
+6. 截图验证结果
+
+执行步骤分解后用 DSL 实现，优先用 type_clipboard 替代 type_text。
+```
+
+### 模板 2: 定时监控任务
+```
+用户需要每隔 [N] 分钟检查 [条件]，满足时执行 [动作]。
+方案: 用 DSL LOOP + WAIT 实现免token监控。
+LOOP 监控循环
+  screenshot → ocr_find_text / color_check 检测状态
+  IF 条件满足
+    CLICK / TYPE 执行动作
+    WAIT 确认结果
+  END
+  WAIT N秒
+END
+用 lobster run 提交后本地引擎循环，不消耗token。
+```
+
+### 模板 3: Web 自动化（通过 Playwright）
+```
+需要: [具体的浏览器操作]
+方案: 如果已安装 Playwright (pip install playwright)，使用 browser_* 功能。
+如果未安装，提示用户安装:
+  pip install playwright && playwright install chromium
+
+browser_navigate → browser_get_url 确认 → 
+browser_list_tabs/switch_tab 多标签管理 → 
+操作完成后用 screenshot 验证
+```
+
+### 模板 4: 故障恢复
+```
+用户反馈 [功能/流程] 出错了。
+诊断流程:
+1. debug_system_info — 获取系统状态
+2. debug_run_tests — 运行测试
+3. debug_get_logs — 查看最新日志
+4. 如果是 DSL 语法问题 → debug_validate_dsl / parse_dsl
+5. 如果是功能调用失败 → dsl_optimize_analyze 分析 telemetry
+
+修复后建议:
+- 如果是超时问题 → 调整 timeout 参数
+- 如果是参数问题 → 检查输入格式
+- 如果是环境问题 → 检查进程/窗口状态
+```
+
+### 模板 5: DSL 流程编排
+```
+用户需要: [复杂多步骤任务]
+拆解方法:
+1. 先列出所有步骤（用自然语言）
+2. 识别可以并行执行的步骤（用 PARALLEL/WITH）
+3. 识别需要循环监控的步骤（用 LOOP）
+4. 识别条件分支（用 IF/ELSE）
+5. 如果步骤太多，封装为 SUBROUTINE
+6. 最终组装成完整 DSL
+
+执行方法:
+- 短流程: lobster run-sync "..." 
+- 长流程/监控: lobster call run_dsl dsl='...'
+- 复杂流程: 写入 .lobster 文件后 lobster run-file xxx.lobster
+```
+
 ## 调试流程
 
 ### 1. 了解系统
@@ -137,13 +215,15 @@ lobster list
 - **测试用例**: `lobster test` 自动执行
 
 ## 关键文件
-- `python/features/registry.py` — 注册表核心
+- `python/features/registry.py` — 注册表核心（含 YAML 声明式加载）
 - `python/features/action_features.py` — 动作功能 (CLICK/TYPE/SCROLL/DRAG/HOTKEY)
 - `python/features/perception_features.py` — 感知功能 (OCR/图像/颜色/进度条)
+- `python/features/browser_features.py` — 浏览器功能（基于 Playwright）
 - `python/features/ai_debug_features.py` — AI + 调试功能
-- `python/mcp/server.py` — MCP 服务端（从 registry 动态生成工具）
-- `cli/lobster.py` — CLI 入口（自动接收新功能）
+- `python/mcp/server.py` — MCP 服务端（从 registry 动态生成工具 + 流式通知）
+- `cli/lobster.py` — CLI 入口（含 plugin search/install 市场命令）
 - `python/server.py` — HTTP 后端（registry 自动路由）
+- `python/engine/optimizer.py` — Telemetry 驱动 DSL 优化分析
 
 ## MCP 配置 (Claude Desktop)
 ```json
@@ -155,4 +235,13 @@ lobster list
     }
   }
 }
+```
+
+## 插件市场
+```bash
+lobster plugin search <关键词>   # 搜索 GitHub 上 topic:lobster-plugin 的插件
+lobster plugin install <url>    # 从 URL 安装插件
+lobster plugin list             # 列出已安装插件
+lobster plugin load <path>      # 手动加载插件文件
+lobster plugin unload <name>    # 卸载插件
 ```

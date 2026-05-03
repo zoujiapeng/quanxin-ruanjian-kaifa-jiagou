@@ -151,6 +151,103 @@ class FeatureRegistry:
         self._load_order.append(spec.name)
         return spec
 
+    def load_feature_yaml(self, yaml_path: str) -> dict:
+        """从 YAML 文件加载功能定义（不需要写 Python 代码）
+
+        YAML 格式:
+          name: my_feature
+          display_name: 我的功能
+          description: 功能描述
+          category: action
+          params:
+            - name: target
+              type: str
+              description: 目标
+          returns: bool
+
+        Returns:
+          dict{success, features_loaded, errors}
+        """
+        try:
+            import yaml
+        except ImportError:
+            return {"success": False, "error": "需要 pyyaml: pip install pyyaml"}
+
+        path = Path(yaml_path)
+        if not path.exists():
+            return {"success": False, "error": f"文件不存在: {yaml_path}"}
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except Exception as e:
+            return {"success": False, "error": f"YAML 解析失败: {e}"}
+
+        if not data:
+            return {"success": False, "error": "空 YAML 文件"}
+        entries = data if isinstance(data, list) else [data]
+
+        loaded = 0
+        errors = []
+        for entry in entries:
+            try:
+                name = entry.get("name", "")
+                if not name:
+                    errors.append("功能缺少 name 字段")
+                    continue
+                if name in self._features:
+                    errors.append(f"功能 '{name}' 已注册")
+                    continue
+
+                cat_str = entry.get("category", "action").upper()
+                try:
+                    category = FeatureCategory(cat_str)
+                except ValueError:
+                    category = FeatureCategory.ACTION
+
+                params = []
+                for p in entry.get("params", []):
+                    params.append(ParamSpec(
+                        name=p.get("name", ""),
+                        type=p.get("type", "str"),
+                        description=p.get("description", ""),
+                        required=p.get("required", True),
+                        default=p.get("default"),
+                    ))
+
+                def _make_handler(feature_name):
+                    def _handler(**kwargs):
+                        return {
+                            "feature": feature_name,
+                            "params": kwargs,
+                            "yaml_defined": True,
+                        }
+                    return _handler
+
+                spec = FeatureSpec(
+                    name=name,
+                    display_name=entry.get("display_name", name),
+                    description=entry.get("description", ""),
+                    category=category,
+                    handler=_make_handler(name),
+                    params=params,
+                    returns=entry.get("returns", "any"),
+                    dsl_keyword=entry.get("dsl_keyword"),
+                    dsl_template=entry.get("dsl_template"),
+                    tags=entry.get("tags", ["yaml"]),
+                )
+                self.register(spec)
+                loaded += 1
+            except Exception as e:
+                errors.append(f"{entry.get('name', 'unknown')}: {e}")
+
+        return {
+            "success": True,
+            "features_loaded": loaded,
+            "errors": errors,
+            "file": str(path),
+        }
+
     @property
     def plugins(self) -> List[dict]:
         """已加载的插件列表"""
