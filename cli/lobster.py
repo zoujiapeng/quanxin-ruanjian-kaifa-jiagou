@@ -252,122 +252,6 @@ def cmd_mcp(args):
     serve()
 
 
-def cmd_plugin(args):
-    """插件管理: lobster plugin search/install/list"""
-    if not args:
-        print("用法: lobster plugin <search|install|list> [参数...]", file=sys.stderr)
-        return
-    sub = args[0]
-    if sub == "search":
-        _plugin_search(args[1:])
-    elif sub == "install":
-        _plugin_install(args[1:])
-    elif sub == "list":
-        _plugin_list()
-    elif sub == "load":
-        _plugin_load(args[1:])
-    elif sub == "unload":
-        _plugin_unload(args[1:])
-    else:
-        print(f"未知插件命令: {sub}", file=sys.stderr)
-
-
-def _plugin_search(args):
-    """搜索插件: lobster plugin search <query>"""
-    query = " ".join(args) if args else ""
-    if not query:
-        print("用法: lobster plugin search <关键词>", file=sys.stderr)
-        return
-    url = f"https://api.github.com/search/repositories?q={query}+topic:lobster-plugin&sort=stars"
-    try:
-        r = requests.get(url, timeout=10)
-        data = r.json()
-        items = data.get("items", [])
-        if not items:
-            print(f"未找到匹配的插件 (query: {query})")
-            print("提示: GitHub 上搜索 topic:lobster-plugin 的仓库")
-            return
-        print(f"\n找到 {len(items)} 个插件:\n")
-        for repo in items[:10]:
-            print(f"  {repo['full_name']:40s} ⭐{repo['stargazers_count']}")
-            print(f"  {repo['description'] or ''}")
-            print(f"  {repo['html_url']}\n")
-    except Exception as e:
-        print(f"搜索失败: {e}", file=sys.stderr)
-
-
-def _plugin_install(args):
-    """安装插件: lobster plugin install <github_url|file_url>"""
-    if not args:
-        print("用法: lobster plugin install <GitHub URL 或 文件 URL>", file=sys.stderr)
-        return
-    url = args[0]
-    target_dir = Path(__file__).resolve().parent.parent / "python" / "plugins"
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    if "github.com" in url and "/blob/" in url:
-        url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
-
-    filename = url.split("/")[-1]
-    if not filename.endswith(".py"):
-        filename += ".py"
-    target = target_dir / filename
-
-    try:
-        print(f"下载: {url}")
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        target.write_bytes(r.content)
-        print(f"已安装: {target}")
-        sys.path.insert(0, str(target_dir))
-        try:
-            from features.registry import registry
-            result = registry.load_plugin(str(target))
-            if result.get("success"):
-                print(f"已加载: {result.get('features_loaded', 0)} 个功能")
-            else:
-                print(f"加载警告: {result.get('error', '')}")
-        except Exception as e:
-            print(f"自动加载失败（可手动重启后使用）: {e}")
-    except Exception as e:
-        print(f"安装失败: {e}", file=sys.stderr)
-
-
-def _plugin_list():
-    """列出已安装的插件"""
-    from features.registry import registry
-    plugins = registry.plugins
-    if not plugins:
-        print("未加载任何插件")
-        print("使用 lobster plugin install <url> 安装插件")
-        return
-    print(f"\n已加载 {len(plugins)} 个插件:\n")
-    for p in plugins:
-        print(f"  {p['name']}")
-        print(f"    路径: {p['path']}")
-    print()
-
-
-def _plugin_load(args):
-    """手动加载插件文件"""
-    if not args:
-        print("用法: lobster plugin load <path>", file=sys.stderr)
-        return
-    from features.registry import registry
-    result = registry.load_plugin(args[0])
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-def _plugin_unload(args):
-    """卸载插件"""
-    if not args:
-        print("用法: lobster plugin unload <name_or_path>", file=sys.stderr)
-        return
-    from features.registry import registry
-    ok = registry.unload_plugin(args[0])
-    print(f"卸载{'成功' if ok else '失败（未找到）'}")
-
-
 # ═══════════════════════════════════════════════════════════════
 # 主入口
 # ═══════════════════════════════════════════════════════════════
@@ -378,7 +262,7 @@ COMMANDS = {
     "pause": cmd_pause, "resume": cmd_resume, "stop": cmd_stop,
     "logs": cmd_logs, "restart": cmd_restart,
     "call": cmd_call, "list": cmd_list, "info": cmd_info, "test": cmd_test,
-    "mcp": cmd_mcp, "plugin": cmd_plugin,
+    "mcp": cmd_mcp,
 }
 
 HELP = """Lobster CLI v2 - 低Token AI自动化执行系统
