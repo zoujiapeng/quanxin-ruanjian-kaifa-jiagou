@@ -265,6 +265,9 @@ class DSLExecutor:
         elif node.type == NodeType.IMPORT:
             self._exec_import(node, ctx)
 
+        elif node.type == NodeType.BREAK:
+            raise BreakLoop()
+
         elif node.type == NodeType.RETURN:
             raise ReturnSignal(node.args)
 

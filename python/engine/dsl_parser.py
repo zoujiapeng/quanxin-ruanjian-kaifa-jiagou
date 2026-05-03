@@ -18,6 +18,7 @@ class NodeType(str, Enum):
     WAIT = "WAIT"
     LOOP = "LOOP"
     IF = "IF"
+    BREAK = "BREAK"
     END = "END"
     RUN = "RUN"
     SEQUENCE = "SEQUENCE"
@@ -81,7 +82,7 @@ class DSLParser:
       RETURN [value]
     """
 
-    KEYWORDS = {"CLICK", "TYPE", "LAUNCH", "WAIT", "LOOP", "IF", "ELSE", "END", "RUN",
+    KEYWORDS = {"CLICK", "TYPE", "LAUNCH", "WAIT", "LOOP", "IF", "BREAK", "ELSE", "END", "RUN",
                 "SUBROUTINE", "CALL", "IMPORT", "RETURN", "WHEN",
                 "PARALLEL", "WITH"}
 
@@ -147,6 +148,9 @@ class DSLParser:
 
             elif keyword == "LAUNCH":
                 nodes.append(ASTNode(NodeType.LAUNCH, args, line=lineno))
+
+            elif keyword == "BREAK":
+                nodes.append(ASTNode(NodeType.BREAK, "", line=lineno))
 
             elif keyword == "WAIT":
                 nodes.append(ASTNode(NodeType.WAIT, args, line=lineno))
