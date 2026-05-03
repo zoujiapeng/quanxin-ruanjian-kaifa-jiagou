@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import features.action_features      # noqa
 import features.perception_features  # noqa
 import features.ai_debug_features    # noqa
+import features.system_features      # noqa
 
 from features.registry import registry, FeatureCategory
 from features.state import push_log, get_logs as _get_logs

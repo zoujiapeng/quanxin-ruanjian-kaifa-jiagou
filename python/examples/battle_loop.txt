@@ -1,0 +1,23 @@
+# 自动战斗脚本
+# 检测战斗 -> 放技能 -> 等待结束 -> 重复
+
+LOOP WHILE text:战斗:
+    # 放技能
+    click 800 650
+    wait 0.3
+    click 900 650
+    wait 0.3
+    click 1000 650
+
+    # 等待战斗结束（直到出现"胜利"或"失败"）
+    UNTIL text:胜利 OR text:失败:
+        wait 1
+
+    # 点击确认
+    click 960 540
+    wait 1
+
+# 回到主界面后收集奖励
+click_text "领取"
+wait 0.5
+click_text "确认"

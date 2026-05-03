@@ -155,3 +155,42 @@ def hotkey(keys: str) -> bool:
         return True
     except ImportError:
         return True
+
+
+@feature(
+    name="type_clipboard",
+    display_name="剪贴板输入",
+    description="通过剪贴板粘贴文字（解决中文输入法问题），保留原剪贴板内容",
+    category=F.ACTION,
+    params=[
+        P("text", "str", "要输入的文字", example="你好世界"),
+    ],
+    returns="bool - 是否成功",
+    dsl_keyword="TYPE_CLIP",
+    dsl_template="TYPE_CLIP {text}",
+    examples=["TYPE_CLIP 你好世界"],
+    test_cases=[
+        TC("basic", {"text": "test"}, "bool_true", skip_in_ci=True),
+    ],
+)
+def type_clipboard(text: str) -> bool:
+    try:
+        import pyperclip
+        import pyautogui
+        import time
+        # 保存原剪贴板
+        old = pyperclip.paste()
+        pyperclip.copy(text)
+        time.sleep(0.05)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.1)
+        # 恢复
+        pyperclip.copy(old)
+        return True
+    except ImportError:
+        try:
+            import pyautogui
+            pyautogui.write(text, interval=0.05)
+            return True
+        except ImportError:
+            return False

@@ -81,19 +81,22 @@ def click_target(target: str) -> bool:
 | `registry.export_claude_context()` | Claude 可读的 Markdown |
 | `registry.export_dsl_reference()` | DSL 语法参考 |
 
-## 已注册功能 (20 个)
+## 已注册功能 (28 个)
 
-### Action (5) — `action_features.py`
-click_target, type_text, scroll, drag, hotkey
+### Action (6) — `action_features.py`
+click_target, type_text, scroll, drag, hotkey, type_clipboard
 
-### Perception (6) — `perception_features.py`
-ocr_find_text, ocr_extract_all, find_image, detect_color, detect_progress, screenshot
+### Perception (7) — `perception_features.py`
+ocr_find_text, ocr_extract_all, find_image, detect_color, detect_progress, popup_close, color_check
 
 ### AI (3) — `ai_debug_features.py`
 ai_generate_dsl, dsl_to_graph, graph_to_dsl
 
 ### Debug (6) — `ai_debug_features.py`
 debug_get_logs, debug_run_tests, debug_list_features, debug_validate_dsl, debug_system_info, debug_generate_test_flow
+
+### System (6) — `system_features.py`
+detect_process, find_processes, focus_window, list_windows, get_active_window, screenshot
 
 ## 三层代码结构
 
@@ -105,21 +108,29 @@ python/
 │   ├── registry.py            # 注册表核心
 │   ├── _utils.py              # 共享工具 (parse_region, resolve_coord, sim_delay)
 │   ├── state.py               # 运行时日志缓冲区
-│   ├── action_features.py     # 动作功能
-│   ├── perception_features.py # 感知功能
-│   ├── ai_debug_features.py   # AI + 调试功能
+│   ├── action_features.py     # 动作功能 (6)
+│   ├── perception_features.py # 感知功能 (7)
+│   ├── ai_debug_features.py   # AI + 调试功能 (9)
+│   ├── system_features.py     # 系统功能 (6)
 │   └── feature_template.py    # 新增功能模板
 ├── engine/                    # DSL 执行引擎
 │   ├── dsl_parser.py          # 递归下降解析器
 │   ├── executor.py            # 状态机执行器
 │   └── scheduler.py           # 优先级队列调度
 ├── perception/                # 视觉感知模块
-│   ├── vision.py              # 模板匹配/颜色/进度条
-│   └── ocr.py                 # Tesseract OCR
+│   ├── vision.py              # 模板匹配/颜色/进度条/场景
+│   └── ocr.py                 # 多后端 OCR (PaddleOCR/EasyOCR/Tesseract)
+├── system/                    # 系统模块
+│   ├── process.py             # 进程检测 (psutil)
+│   ├── window.py              # 窗口管理 (pygetwindow/win32)
+│   └── resolution.py          # 分辨率适配
 ├── interaction/               # 交互模块
 │   └── actions.py             # 鼠标/键盘/弹窗/宏
+├── utils/                     # 工具函数
+│   └── bezier.py              # 贝塞尔曲线 (人类行为模拟)
 ├── mcp/                       # MCP 服务端
 │   └── server.py              # stdio 协议，动态生成工具
+├── examples/                  # .flow 流程图示例 (14个)
 └── macros/                    # DSL 宏脚本
 ```
 

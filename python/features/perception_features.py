@@ -170,3 +170,65 @@ def screenshot(region: str = "", format: str = "jpeg", quality: int = 70):
         return {"base64": b64, "width": w, "height": h, "format": format}
     except ImportError:
         return {"base64": "", "width": 0, "height": 0, "format": format, "error": "模拟模式"}
+
+
+@feature(
+    name="popup_close",
+    display_name="关闭弹窗",
+    description="自动检测并关闭屏幕上的弹窗（支持OCR文字匹配关闭按钮）",
+    category=F.PERCEPTION,
+    params=[
+        P("text", "str", "要点击的按钮文字（可选，留空则自动检测）", required=False, default=""),
+        P("timeout", "number", "超时秒数", required=False, default=5),
+    ],
+    returns="bool - 是否关闭了弹窗",
+    test_cases=[
+        TC("auto_close", {"text": "", "timeout": 2}, "success",
+           validator=lambda r: r.get("success") is True, skip_in_ci=True),
+    ],
+)
+def popup_close(text: str = "", timeout: float = 5) -> bool:
+    try:
+        from interaction.actions import ActionHandler, AutoPopup, ClickTarget
+        from perception.ocr import OCREngine
+        from perception.vision import TemplateMatcher
+        ocr = OCREngine()
+        matcher = TemplateMatcher()
+        clicker = ClickTarget(ocr, matcher)
+        popup = AutoPopup(clicker)
+        if text:
+            return popup.close_by_text(text, timeout=timeout)
+        return popup.check_and_handle(ocr)
+    except ImportError:
+        return False
+
+
+@feature(
+    name="color_check",
+    display_name="颜色检查",
+    description="检测指定区域内是否包含目标颜色，返回通过/失败",
+    category=F.PERCEPTION,
+    params=[
+        P("h", "number", "色相 Hue 0-179", example=120),
+        P("s", "number", "饱和度 Saturation 0-255", example=200),
+        P("v", "number", "亮度 Value 0-255", example=200),
+        P("region", "str", "检测区域 'x,y,w,h'"),
+        P("tolerance", "number", "HSV容差", required=False, default=15),
+        P("min_ratio", "number", "最小占比 0-1", required=False, default=0.1),
+    ],
+    returns="dict{match, ratio} - 是否匹配及颜色占比",
+    test_cases=[
+        TC("basic", {"h": 0, "s": 0, "v": 0, "region": "0,0,100,100"}, "success"),
+    ],
+)
+def color_check(h: int, s: int, v: int, region: str, tolerance: int = 15, min_ratio: float = 0.1) -> dict:
+    try:
+        from perception.vision import ColorDetector
+        from features._utils import parse_region
+        reg = parse_region(region)
+        if reg is None:
+            return {"match": False, "ratio": 0.0, "error": "无效区域"}
+        ratio = ColorDetector.detect_color((h, s, v), tolerance=(tolerance,) * 3, region=reg)
+        return {"match": ratio >= min_ratio, "ratio": round(ratio, 3)}
+    except ImportError:
+        return {"match": False, "ratio": 0.0}

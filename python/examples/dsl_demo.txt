@@ -1,0 +1,64 @@
+# DSL 演示脚本 - 展示所有功能
+
+# === 基础点击 ===
+click 500 500
+click 600 400 offset: 10 20
+click 700 300 double
+click 800 200 right
+
+# === 图像识别点击 ===
+clickImage "button.png"
+clickImage "icon.png" offset: 5 5
+
+# === 文本输入 ===
+type "Hello World"
+
+# === 等待 ===
+wait 2
+wait 0.5 - 1.5
+
+# === 键盘 ===
+key ctrl+c
+key ctrl+v
+key enter
+
+# === 滑动 ===
+swipe 100 200 300 400
+
+# === 变量 ===
+set counter = 0
+set name = "player1"
+set score = 100
+
+# === 循环 ===
+LOOP 5:
+    click 500 500
+    wait 0.5
+    set counter = {{counter}} + 1
+
+# === LOOP WHILE 条件循环（注意：以下循环会一直等 loading.png 出现才结束）
+# 如果没有 loading.png 图片，请改成 LOOP 3: 避免无限循环
+LOOP WHILE img:loading.png:
+    wait 0.3
+
+# === 条件分支 ===
+IF text:领取:
+    clickImage "claim_button.png"
+    wait 1
+    click 960 540
+ELSE:
+    wait 2
+
+IF var:score > 50:
+    click_text "高级奖励"
+ELSE:
+    click_text "普通奖励"
+
+# === UNTIL 循环 ===
+UNTIL color:(0,0,100x50)#(30,200,200),20:
+    wait 0.3
+    click 500 500
+
+# === 截图 ===
+screenshot
+screenshot "debug_capture.png"

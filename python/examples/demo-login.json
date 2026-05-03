@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "id": "demo-login",
+    "name": "示例-自动登录",
+    "description": "自动打开网站并登录的示例脚本",
+    "created_at": "2026-05-01T00:00:00.000Z",
+    "updated_at": "2026-05-01T00:00:00.000Z",
+    "version": "1.0.0",
+    "author": "灵动脚本"
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "x": 360,
+      "y": 80,
+      "params": { "label": "开始" },
+      "status": "idle"
+    },
+    {
+      "id": "click-1",
+      "type": "click",
+      "x": 360,
+      "y": 200,
+      "params": {
+        "x": 960,
+        "y": 540,
+        "offsetX": 0,
+        "offsetY": 0,
+        "method": "single",
+        "delay_after": 1.0,
+        "description": "点击浏览器图标"
+      },
+      "label": "打开浏览器",
+      "status": "idle"
+    },
+    {
+      "id": "wait-1",
+      "type": "wait",
+      "x": 360,
+      "y": 320,
+      "params": {
+        "wait_type": "time",
+        "duration": 3,
+        "description": "等待浏览器启动"
+      },
+      "label": "等待启动",
+      "status": "idle"
+    },
+    {
+      "id": "input-1",
+      "type": "input_text",
+      "x": 360,
+      "y": 440,
+      "params": {
+        "text": "admin@example.com",
+        "click_before": true,
+        "clear_before": true,
+        "delay_after": 0.5,
+        "description": "输入用户名"
+      },
+      "label": "输入用户名",
+      "status": "idle"
+    },
+    {
+      "id": "input-2",
+      "type": "input_text",
+      "x": 360,
+      "y": 560,
+      "params": {
+        "text": "mypassword123",
+        "click_before": true,
+        "clear_before": true,
+        "delay_after": 0.5,
+        "description": "输入密码"
+      },
+      "label": "输入密码",
+      "status": "idle"
+    },
+    {
+      "id": "click-2",
+      "type": "click",
+      "x": 360,
+      "y": 680,
+      "params": {
+        "x": 960,
+        "y": 600,
+        "offsetX": 0,
+        "offsetY": 0,
+        "method": "single",
+        "delay_after": 2.0,
+        "description": "点击登录按钮"
+      },
+      "label": "点击登录",
+      "status": "idle"
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "x": 360,
+      "y": 800,
+      "params": { "label": "结束" },
+      "status": "idle"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from_node": "start-1", "from_port": "output", "to_node": "click-1", "to_port": "input" },
+    { "id": "e2", "from_node": "click-1", "from_port": "output", "to_node": "wait-1", "to_port": "input" },
+    { "id": "e3", "from_node": "wait-1", "from_port": "output", "to_node": "input-1", "to_port": "input" },
+    { "id": "e4", "from_node": "input-1", "from_port": "output", "to_node": "input-2", "to_port": "input" },
+    { "id": "e5", "from_node": "input-2", "from_port": "output", "to_node": "click-2", "to_port": "input" },
+    { "id": "e6", "from_node": "click-2", "from_port": "output", "to_node": "end-1", "to_port": "input" }
+  ],
+  "variables": {},
+  "settings": {
+    "default_delay": 0.5,
+    "error_handling": "stop",
+    "max_retries": 3,
+    "retry_delay": 1,
+    "log_level": "info"
+  }
+}

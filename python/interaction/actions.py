@@ -228,6 +228,11 @@ class WaitCondition:
 class AutoPopup:
     """自动弹窗处理"""
 
+    # 常见关闭按钮文字
+    CLOSE_KEYWORDS = ['x', '×', 'close', '关闭', '取消', 'dismiss', '忽略',
+                      'confirm', '确定', 'yes', '是', 'no', '否', 'ok',
+                      'got it', '知道了']
+
     def __init__(self, clicker: ClickTarget):
         self._clicker = clicker
         self._rules: List[dict] = []
@@ -252,6 +257,12 @@ class AutoPopup:
                     time.sleep(0.3)
                     return True
         return False
+
+    def close_by_text(self, text: str, timeout: float = 5.0) -> bool:
+        """通过文字匹配关闭弹窗"""
+        from perception.ocr import OCREngine
+        ocr = OCREngine()
+        return self._clicker.click(text, timeout=timeout)
 
 
 class ActionHandler:

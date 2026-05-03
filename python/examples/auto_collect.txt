@@ -1,0 +1,11 @@
+# 自动收菜/收集奖励脚本
+# 循环扫描 "领取" 按钮并点击，直到扫完
+
+LOOP 20:
+    clickImage "reward_button.png"
+    wait 0.5
+
+# 检查是否还有剩余奖励
+UNTIL text:领取 == false:
+    clickAll 领取
+    wait 1

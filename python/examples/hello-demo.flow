@@ -1,0 +1,7 @@
+// 演示：打开记事本并输入文字
+按键 win+r
+等待 0.5
+输入 "notepad"
+按键 enter
+等待 1
+输入 "Hello from Lingdong Script!"
