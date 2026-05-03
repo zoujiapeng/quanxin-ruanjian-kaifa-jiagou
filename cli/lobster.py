@@ -251,6 +251,68 @@ def cmd_mcp(args):
     from mcp.server import serve
     serve()
 
+def cmd_region_select(args):
+    """用户交互式框选区域 (无需后端, 直接显示 tkinter 窗口)
+
+    用法: lobster region-select [message]
+         lobster region-select "请框选进度条区域"
+    输出: {"x": 100, "y": 200, "w": 300, "h": 50}
+    """
+    message = args[0] if args else "请拖拽选择监控区域"
+    try:
+        from interaction.region_picker import RegionPicker
+    except ImportError:
+        print("错误: 无法导入 RegionPicker", file=sys.stderr)
+        sys.exit(1)
+    region = RegionPicker.pick(message)
+    if region:
+        x, y, w, h = region
+        result = {"x": x, "y": y, "w": w, "h": h}
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        print(json.dumps({"cancelled": True}))
+
+
+def cmd_exec(args):
+    """直接执行 DSL (无需后端, 直接调用执行引擎)
+
+    用法: lobster exec <dsl 代码>
+         lobster exec "CLICK 开始"
+         lobster exec script.lobster    # 自动检测文件
+         echo "CLICK 开始" | lobster exec -
+
+    这是新 Claude Code 最常用的命令:
+    不需要 MCP 工具, 不需要后端服务器, 一行命令直接运行
+    """
+    dsl = args[0] if args else ""
+    if dsl == "-" and not sys.stdin.isatty():
+        dsl = sys.stdin.read()
+    # 自动检测文件路径
+    if dsl and not dsl.startswith(("CLICK", "WAIT", "LOOP", "IF", "SCREENSHOT",
+                                    "TYPE", "LAUNCH", "FOCUS", "HOTKEY", "SET",
+                                    "OCR_FIND", "OCR_EXTRACT", "REGION_SELECT",
+                                    "SUBROUTINE", "CALL", "WHEN", "PARALLEL")):
+        p = Path(dsl)
+        if p.exists():
+            dsl = p.read_text("utf-8")
+    if not dsl.strip():
+        print("用法: lobster exec \"CLICK 目标\"", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        from engine.executor import DSLExecutor
+        exe = DSLExecutor()
+        result = exe.run_dsl_sync(dsl)
+        if result:
+            print(f"\n执行完成: state={result.get('state','?')}, elapsed={result.get('elapsed',0)}s")
+        else:
+            print("\n执行完成")
+    except Exception as e:
+        print(f"执行失败: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
 
 # ═══════════════════════════════════════════════════════════════
 # 主入口
@@ -258,42 +320,53 @@ def cmd_mcp(args):
 
 COMMANDS = {
     "run": cmd_run, "run-file": cmd_run_file, "run-sync": cmd_run_sync,
+    "exec": cmd_exec,
     "parse": cmd_parse, "health": cmd_health, "status": cmd_status,
     "pause": cmd_pause, "resume": cmd_resume, "stop": cmd_stop,
     "logs": cmd_logs, "restart": cmd_restart,
     "call": cmd_call, "list": cmd_list, "info": cmd_info, "test": cmd_test,
     "mcp": cmd_mcp,
+    "region-select": cmd_region_select,
 }
 
 HELP = """Lobster CLI v2 - 低Token AI自动化执行系统
 
 用法: lobster <command> [参数...]
 
-核心命令:
+后端 (需运行 lobster restart 启动):
   run <dsl>                 执行 DSL
   run-file <file>           从文件执行 DSL
   run-sync <dsl>            同步执行 DSL (等待完成)
+  restart [port]            重启后端
+
+直接 (无需后端):
+  exec <dsl>                直接执行 DSL
   parse <dsl>               解析 DSL 为 AST
+  region-select [message]   用户框选区域 → JSON
+
+状态:
   health                    检查后端状态
   status                    查看执行器状态
   pause / resume / stop     控制执行器
   logs [n]                  查看执行日志
-  restart [port]            重启后端
 
-注册功能:
-  call <name> [key=val...]  调用任意注册功能
-  list [category]           列出所有功能
-  info <name>               查看功能详情
+功能:
+  call <name> [key=val...]  调用注册功能
+  list [category]           列出功能
+  info <name>               功能详情
   test [category]           运行测试
 
 集成:
   mcp                       启动 MCP 服务端
 
+新 Claude Code 工作流:
+  1. lobster region-select "框选监控区域"  → 获得 JSON 坐标
+  2. lobster exec "LOOP ... IF PROGRESS {x},{y},{w},{h} ..."  → 执行监控
+
 示例:
   lobster run "CLICK 开始"
-  lobster call click-target target=确认 timeout=5
-  lobster list action
-  lobster info screenshot
+  lobster exec "CLICK 确认"
+  lobster region-select "请框选进度条区域"
 """
 
 def main():
