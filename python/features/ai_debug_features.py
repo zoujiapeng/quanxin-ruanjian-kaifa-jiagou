@@ -18,7 +18,7 @@ from features.state import get_logs
 @feature(
     name="ai_generate_dsl",
     display_name="AI生成DSL",
-    description="将自然语言任务描述转换为 Lobster DSL",
+    description="【AI 规划】将自然语言任务描述转换为 Lobster DSL。核心组合工具：Claude Code 分析任务 → ai_generate_dsl 生成 DSL → lobster_run_dsl 执行（免 token）。使用场景：复杂任务先用自然语言描述，让 AI 规划后执行。组合：Claude 规划 + Lobster 执行流程的核心。搭配 lobster_run_dsl/lobster_run_dsl_sync 执行、dsl_to_graph 可视化",
     category=F.AI,
     params=[
         P("task", "str", "自然语言任务描述", example="打开微信给张三发消息"),
@@ -86,7 +86,7 @@ def ai_generate_dsl(task: str, api_key: str = "", context: str = "") -> dict:
 @feature(
     name="dsl_to_graph",
     display_name="DSL转流程图",
-    description="将 DSL 文本转换为 React Flow 兼容的节点/边 JSON",
+    description="【可视化】将 DSL 文本转换为 React Flow 格式的节点/边 JSON。使用场景：在 UI 中展示 DSL 流程图、调试 DSL 结构。组合：ai_generate_dsl 生成 DSL → dsl_to_graph 可视化。也可反向 graph_to_dsl：在 UI 中编辑流程图后转回 DSL 执行",
     category=F.AI,
     params=[
         P("dsl", "str", "DSL文本", example="CLICK 开始\nWAIT 加载"),
@@ -171,7 +171,7 @@ def dsl_to_graph(dsl: str, layout: str = "vertical") -> dict:
 @feature(
     name="graph_to_dsl",
     display_name="流程图转DSL",
-    description="将 React Flow 节点/边 JSON 转换回 DSL 文本",
+    description="【可视化·反向】将 React Flow 节点/边 JSON 转换回 DSL 文本。使用场景：在图编辑器中编辑流程后转回 DSL 执行。组合：dsl_to_graph → 人工编辑 → graph_to_dsl → lobster_run_dsl",
     category=F.AI,
     params=[
         P("nodes", "string", "JSON字符串：节点数组"),
@@ -214,7 +214,7 @@ def graph_to_dsl(nodes: str, edges: str) -> str:
 @feature(
     name="debug_get_logs",
     display_name="获取执行日志",
-    description="返回执行器最近的日志",
+    description="【调试·日志】返回执行器最近的日志。使用场景：诊断 DSL 执行失败原因、查看执行历史。组合：失败后先 debug_get_logs 看错误 → debug_system_info 检查环境 → debug_validate_dsl 验证 DSL",
     category=F.DEBUG,
     params=[
         P("count", "number", "日志条数", required=False, default=50),
@@ -228,7 +228,7 @@ def debug_get_logs(count: int = 50):
 @feature(
     name="debug_run_tests",
     display_name="运行测试",
-    description="运行所有注册功能的测试用例",
+    description="【调试·测试】运行所有注册功能的测试用例。使用场景：系统升级后验证完整性、新增功能后回归测试。组合：debug_run_tests → 有失败则 debug_get_logs + debug_system_info 排查。这是 CI/CD 的核心命令",
     category=F.DEBUG,
     params=[
         P("category", "str", "只测试指定类别（可选）", required=False, default=""),
@@ -253,7 +253,7 @@ def debug_run_tests(category: str = "", skip_ci: bool = True) -> dict:
 @feature(
     name="debug_list_features",
     display_name="列出功能",
-    description="返回所有注册功能的完整信息",
+    description="【调试·发现】返回所有注册功能的完整信息。使用场景：Claude Code 启动时先调用此工具了解可用能力、搜索特定功能。format=markdown 返回 Claude 可读格式，format=mcp 返回 MCP schema。这是 Claude Code 理解 Lobster 能力的入口",
     category=F.DEBUG,
     params=[
         P("category", "str", "过滤类别（可选）", required=False, default=""),
@@ -284,7 +284,7 @@ def debug_list_features(category: str = "", format: str = "json"):
 @feature(
     name="debug_validate_dsl",
     display_name="验证DSL语法",
-    description="解析并验证 DSL 文本，返回 AST 和错误信息",
+    description="【调试·DSL验证】解析并验证 DSL 文本语法，返回 AST 和错误信息。使用场景：执行 DSL 前先验证语法、调试 DSL 错误。组合：debug_validate_dsl 验证 → ok 则 lobster_run_dsl 执行。推荐在执行前 always 先验证",
     category=F.DEBUG,
     params=[
         P("dsl", "str", "DSL文本", example="CLICK 开始\nWAIT 完成"),
@@ -309,7 +309,7 @@ def debug_validate_dsl(dsl: str) -> dict:
 @feature(
     name="debug_system_info",
     display_name="系统诊断",
-    description="返回系统状态、依赖检查、功能统计",
+    description="【调试·诊断】返回系统状态、依赖检查、功能统计。使用场景：排查系统问题时先诊断环境、确认依赖是否完整、查看功能总数。组合：debug_system_info → 发现问题 → debug_run_tests 确认 → debug_get_logs 查看详情。这是故障排查的起点",
     category=F.DEBUG,
     params=[],
     returns="dict - 系统诊断报告",
@@ -344,7 +344,7 @@ def debug_system_info() -> dict:
 @feature(
     name="debug_generate_test_flow",
     display_name="生成测试流程图",
-    description="AI自主生成测试场景的DSL和流程图，用于验证系统功能",
+    description="【调试·自测】AI 自主生成测试场景的 DSL 和流程图，用于验证系统功能。使用场景：新增功能后自动生成测试流程、回归测试。这是系统自调试能力的体现",
     category=F.DEBUG,
     params=[
         P("scenario", "str", "测试场景描述", example="测试点击和等待功能"),

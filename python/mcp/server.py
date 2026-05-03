@@ -1,9 +1,14 @@
 """
-Lobster MCP Server
-从功能注册表动态生成 MCP 工具
+Lobster MCP Server v2 — 自给自足版
+从功能注册表动态生成 MCP 工具，自带 DSL 执行器
+
+核心设计：
+- 所有功能通过 registry 执行（本地或代理到后端）
+- run_dsl / run_dsl_sync 本地执行（免 token）
+- 后端可用时自动代理其余功能，不可用时降级
 """
 from __future__ import annotations
-import json, os, sys, time
+import json, os, sys, time, traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -13,8 +18,11 @@ import features.action_features      # noqa
 import features.perception_features  # noqa
 import features.ai_debug_features    # noqa
 import features.system_features      # noqa
+import features.dsl_features         # noqa
 
 from features.registry import registry
+from engine.dsl_parser import DSLParser
+from engine.executor import DSLExecutor, ExecutionContext
 
 BACKEND_URL = os.getenv("LOBSTER_URL", "http://localhost:7788")
 HAS_REQUESTS = True
@@ -23,27 +31,88 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
+# ── 本地 DSL 执行器（免 token 关键组件）─────────────────────────────
+_action_handler = None
+try:
+    from interaction.actions import ActionHandler
+    _action_handler = ActionHandler()
+except ImportError:
+    pass
+
+_executor = DSLExecutor(action_handler=_action_handler)
+_has_local_executor = _action_handler is not None
+
 
 # ── 工具处理 ──────────────────────────────────────────────────────
 
 def handle_tool_call(name: str, arguments: dict) -> str:
     """处理 MCP tools/call"""
-    # map: lobster_click_target -> click_target
     feature_name = name
     if name.startswith("lobster_"):
         feature_name = name[8:]
 
-    # 本地可执行的功能（不依赖后端）
-    if feature_name in ("debug_list_features",):
+    # ── DSL 执行（本地，免 token） ──
+    if feature_name == "run_dsl":
+        return _exec_run_dsl(arguments)
+    if feature_name == "run_dsl_sync":
+        return _exec_run_dsl_sync(arguments)
+
+    # ── 本地可执行的功能（不依赖后端） ──
+    local_features = {
+        "debug_list_features", "debug_validate_dsl", "debug_system_info",
+        "debug_run_tests", "debug_get_logs", "debug_generate_test_flow",
+        "dsl_to_graph", "graph_to_dsl", "parse_dsl",
+    }
+    if feature_name in local_features:
         result = registry.execute(feature_name, **arguments)
         return _format_result(result)
 
-    if feature_name in ("debug_validate_dsl", "dsl_to_graph", "graph_to_dsl", "parse_dsl"):
-        result = registry.execute(feature_name, **arguments)
-        return _format_result(result)
-
-    # 后端代理
+    # ── 后端代理 ──
     return _proxy_to_backend(feature_name, arguments)
+
+
+def _exec_run_dsl(args: dict) -> str:
+    """本地执行 DSL（异步提交，立即返回 task_id）"""
+    dsl = args.get("dsl", "")
+    if not dsl.strip():
+        return "错误: DSL 内容为空"
+    try:
+        DSLParser.from_string(dsl)  # 语法验证
+        task_id = args.get("task_id") or str(uuid4_short())
+        ctx = ExecutionContext(
+            max_loops=args.get("max_loops", 100),
+            timeout=args.get("timeout", 60),
+        )
+        _executor.run_dsl(dsl, ctx=ctx)
+        return json.dumps({"success": True, "task_id": task_id, "state": "running"}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
+def _exec_run_dsl_sync(args: dict) -> str:
+    """本地执行 DSL（同步，等待完成）"""
+    dsl = args.get("dsl", "")
+    if not dsl.strip():
+        return "错误: DSL 内容为空"
+    start = time.time()
+    try:
+        DSLParser.from_string(dsl)
+        ctx = ExecutionContext(
+            max_loops=args.get("max_loops", 10),
+            retry_limit=args.get("retry_limit", 1),
+            timeout=args.get("timeout", 30),
+        )
+        _executor.run_dsl_sync(dsl, ctx=ctx)
+        elapsed = round(time.time() - start, 2)
+        return json.dumps({
+            "success": True, "state": _executor.state.value,
+            "elapsed": elapsed,
+        }, ensure_ascii=False)
+    except Exception as e:
+        elapsed = round(time.time() - start, 2)
+        return json.dumps({
+            "success": False, "error": str(e), "elapsed": elapsed,
+        }, ensure_ascii=False)
 
 
 def _format_result(result: dict) -> str:
@@ -74,6 +143,11 @@ def _proxy_to_backend(feature_name: str, arguments: dict) -> str:
         return f"无法连接后端 ({BACKEND_URL})"
     except Exception as e:
         return f"请求失败: {e}"
+
+
+def _build_tools_list() -> list[dict]:
+    """构造 MCP tools 列表（registry 已包含 DSL 执行工具）"""
+    return registry.export_mcp_tools()
 
 
 # ── MCP stdio 协议 ────────────────────────────────────────────────
@@ -110,6 +184,12 @@ def _send_message(msg: dict):
     sys.stdout.flush()
 
 
+def uuid4_short() -> str:
+    """简短唯一 ID"""
+    import uuid
+    return uuid.uuid4().hex[:12]
+
+
 def serve():
     """主循环"""
     tools_cache = None
@@ -138,7 +218,7 @@ def serve():
 
         elif method == "tools/list":
             if tools_cache is None:
-                tools_cache = registry.export_mcp_tools()
+                tools_cache = _build_tools_list()
             _send_message({
                 "jsonrpc": "2.0", "id": msg_id,
                 "result": {"tools": tools_cache},
