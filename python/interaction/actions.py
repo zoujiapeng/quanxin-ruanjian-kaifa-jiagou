@@ -15,7 +15,7 @@ from typing import Optional, Tuple, Callable, Any, List
 import pyautogui
 import numpy as np
 
-from perception.vision import ScreenCapture, TemplateMatcher, ChangeDetector, BBox, Point
+from perception.vision import ScreenCapture, TemplateMatcher, ChangeDetector, ColorDetector, BBox, Point
 from perception.ocr import OCREngine
 
 # 禁用 pyautogui 故障保险（生产中可调整）
@@ -287,9 +287,14 @@ class ActionHandler:
         """执行器调用入口"""
         handlers = {
             "click": self._handle_click,
+            "type": self._handle_type,
             "wait": self._handle_wait,
+            "launch": self._handle_launch,
             "check_condition": self._handle_condition,
             "run_macro": self._handle_macro,
+            "screenshot": self._handle_screenshot,
+            "wait_screen_change": self._handle_wait_screen_change,
+            "wait_screen_stable": self._handle_wait_screen_stable,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -304,15 +309,67 @@ class ActionHandler:
         region = ctx.variables.get("region") if ctx else None
         return self.waiter.wait(condition, timeout=timeout, region=region)
 
+    def _handle_type(self, text: str, ctx=None, **_) -> bool:
+        HumanKeyboard.type_text(text)
+        return True
+
+    def _handle_launch(self, target: str, ctx=None, **_) -> bool:
+        import subprocess
+        subprocess.Popen(target, shell=True)
+        return True
+
+    def _handle_screenshot(self, dest: str = "", ctx=None, **_) -> dict:
+        import base64, cv2
+        img = ScreenCapture.capture()
+        result = {"base64": "", "width": img.shape[1], "height": img.shape[0], "format": "png"}
+        if dest:
+            cv2.imwrite(dest, img)
+            result["path"] = dest
+        _, buf = cv2.imencode(".png", img)
+        result["base64"] = base64.b64encode(buf).decode()
+        return result
+
+    def _handle_wait_screen_change(self, timeout: float = 30.0, ctx=None, **_) -> bool:
+        end = time.time() + timeout
+        while time.time() < end:
+            if self.detector.has_changed():
+                return True
+            time.sleep(0.3)
+        return False
+
+    def _handle_wait_screen_stable(self, timeout: float = 30.0, ctx=None, **_) -> bool:
+        return self.detector.is_stable(duration=min(timeout, 2.0))
+
     def _handle_condition(self, condition: str, ctx=None, **_) -> bool:
         """执行条件判断"""
-        # 条件格式: "血量低于30%" | "文字:XXX存在" | "图像:XXX存在"
+        # 颜色条件: COLOR H,S,V AT x,y,w,h [MIN_RATIO N]
+        if condition.upper().startswith("COLOR "):
+            return self._check_color_condition(condition)
+        # 进度条类条件
         if "低于" in condition or "less than" in condition.lower():
-            # 进度条类条件
             return self._check_threshold(condition, ctx)
         region = ctx.variables.get("region") if ctx else None
         result = self.ocr.find_text(condition, region=region)
         return result is not None
+
+    def _check_color_condition(self, condition: str) -> bool:
+        """COLOR H,S,V AT x,y,w,h [MIN_RATIO N]"""
+        import re
+        m = re.match(
+            r"COLOR\s+([\d,.]+)\s+AT\s+([\d,]+)(?:\s+MIN_RATIO\s+([\d.]+))?",
+            condition, re.IGNORECASE
+        )
+        if not m:
+            return False
+        hsv_parts = m.group(1).split(",")
+        reg_parts = m.group(2).split(",")
+        if len(hsv_parts) != 3 or len(reg_parts) != 4:
+            return False
+        h, s, v = int(hsv_parts[0]), int(hsv_parts[1]), int(hsv_parts[2])
+        x, y, w, h = int(reg_parts[0]), int(reg_parts[1]), int(reg_parts[2]), int(reg_parts[3])
+        min_ratio = float(m.group(3)) if m.group(3) else 0.1
+        ratio = ColorDetector.detect_color((h, s, v), region=(x, y, w, h))
+        return ratio >= min_ratio
 
     def _check_threshold(self, condition: str, ctx) -> bool:
         # 简单示例: 识别屏幕上的数值进度

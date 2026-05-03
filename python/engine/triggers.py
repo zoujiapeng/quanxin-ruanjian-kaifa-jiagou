@@ -48,6 +48,7 @@ class TriggerInstance:
     fired_count: int = 0
     created_at: float = 0.0
     last_fired: float = 0.0
+    recurring: bool = False  # 触发后是否重新布防（用于定时器）
     _thread: Optional[threading.Thread] = None
     _stop_event: threading.Event = field(default_factory=threading.Event)
 
@@ -108,7 +109,8 @@ class TriggerEngine:
         self._executor = executor
 
     def register(self, spec_name: str, config: dict,
-                 handler_actions: list) -> TriggerInstance:
+                 handler_actions: list,
+                 recurring: bool = False) -> TriggerInstance:
         """注册一个触发器实例并启动监控"""
         spec = _TRIGGER_TYPES.get(spec_name)
         if not spec:
@@ -121,6 +123,7 @@ class TriggerEngine:
             config=config,
             handler_actions=handler_actions,
             created_at=time.time(),
+            recurring=recurring,
         )
         inst._stop_event = threading.Event()
 
@@ -153,7 +156,9 @@ class TriggerEngine:
                     inst.last_fired = time.time()
                     inst.status = "fired"
                     self._execute_handler(inst)
-                    # 事件触发器默认只触发一次，自动停止
+                    if inst.recurring:
+                        inst.status = "running"
+                        continue
                     inst.status = "stopped"
                     break
             except Exception as e:
@@ -380,6 +385,12 @@ def _watch_network(config: dict, stop: threading.Event) -> bool:
     return False
 
 
+def _watch_timer_interval(config: dict, stop: threading.Event) -> bool:
+    """定时器触发: 等待设定的间隔后返回 True"""
+    interval = config.get("interval", 10.0)
+    return not stop.wait(interval)  # interval 耗尽 → 触发；被停止 → 不触发
+
+
 # Watcher 函数映射
 _WATCHER_FUNCTIONS = {
     "file_created": _watch_file_created,
@@ -389,6 +400,7 @@ _WATCHER_FUNCTIONS = {
     "window_open": _watch_window_open,
     "clipboard_change": _watch_clipboard,
     "network_available": _watch_network,
+    "timer_interval": _watch_timer_interval,
 }
 
 
@@ -446,6 +458,15 @@ def _reg_clipboard(): pass
             ("port", "number", "检测端口")],
 )
 def _reg_network(): pass
+
+@trigger_type(
+    name="timer_interval", display_name="定时器",
+    description="按固定间隔定时触发，可循环",
+    category=TriggerCategory.TIMER, event_key="TIMER_INTERVAL",
+    params=[("interval", "number", "触发间隔秒数"),
+            ("count", "number", "触发次数（0=无限）")],
+)
+def _reg_timer(): pass
 
 
 # ── 全局单例 ────────────────────────────────────────────────────

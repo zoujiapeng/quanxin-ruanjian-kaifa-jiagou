@@ -29,6 +29,9 @@ class NodeType(str, Enum):
     WHEN = "WHEN"
     PARALLEL = "PARALLEL"
     WITH = "WITH"
+    SCREENSHOT = "SCREENSHOT"
+    WAITSCREEN = "WAITSCREEN"
+    SCREENSTABLE = "SCREENSTABLE"
 
 
 @dataclass
@@ -84,7 +87,8 @@ class DSLParser:
 
     KEYWORDS = {"CLICK", "TYPE", "LAUNCH", "WAIT", "LOOP", "IF", "BREAK", "ELSE", "END", "RUN",
                 "SUBROUTINE", "CALL", "IMPORT", "RETURN", "WHEN",
-                "PARALLEL", "WITH"}
+                "PARALLEL", "WITH",
+                "SCREENSHOT", "WAITSCREEN", "SCREENSTABLE"}
 
     def __init__(self):
         self._tokens: List[tuple[int, str, str]] = []
@@ -151,6 +155,15 @@ class DSLParser:
 
             elif keyword == "BREAK":
                 nodes.append(ASTNode(NodeType.BREAK, "", line=lineno))
+
+            elif keyword == "SCREENSHOT":
+                nodes.append(ASTNode(NodeType.SCREENSHOT, args, line=lineno))
+
+            elif keyword == "WAITSCREEN":
+                nodes.append(ASTNode(NodeType.WAITSCREEN, args, line=lineno))
+
+            elif keyword == "SCREENSTABLE":
+                nodes.append(ASTNode(NodeType.SCREENSTABLE, args, line=lineno))
 
             elif keyword == "WAIT":
                 nodes.append(ASTNode(NodeType.WAIT, args, line=lineno))

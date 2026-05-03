@@ -280,6 +280,15 @@ class DSLExecutor:
         elif node.type == NodeType.WITH:
             self._exec_with(node, ctx)
 
+        elif node.type == NodeType.SCREENSHOT:
+            self._exec_screenshot(node, ctx)
+
+        elif node.type == NodeType.WAITSCREEN:
+            self._exec_waitscreen(node, ctx)
+
+        elif node.type == NodeType.SCREENSTABLE:
+            self._exec_screenstable(node, ctx)
+
         # SUBROUTINE 定义直接跳过（已在 parser 注册）
 
     # ── 指令执行 ─────────────────────────────────────────────────
@@ -360,6 +369,33 @@ class DSLExecutor:
         self._log(f"RUN 宏: {macro}")
         self._call_action("run_macro", macro_name=macro, ctx=ctx)
         self._emit("node_done", node_type="RUN", args=macro, line=node.line)
+
+    def _exec_screenshot(self, node: ASTNode, ctx: ExecutionContext):
+        dest = self._interpolate(node.args) if node.args else ""
+        self._emit("node_start", node_type="SCREENSHOT", args=dest, line=node.line)
+        self._log(f"SCREENSHOT: {dest or '(default)'}")
+        result = self._call_action("screenshot", dest=dest, ctx=ctx)
+        self._set_var("_screenshot", result)
+        self._emit("node_done", node_type="SCREENSHOT", args=dest, line=node.line)
+
+    def _exec_waitscreen(self, node: ASTNode, ctx: ExecutionContext):
+        args = self._interpolate(node.args)
+        # 语法: WAITSCREEN timeout(秒) 或 WAITSCREEN
+        timeout = float(args) if args else 30.0
+        self._emit("node_start", node_type="WAITSCREEN", args=str(timeout), line=node.line)
+        self._log(f"WAITSCREEN: 等待屏幕变化 (超时{timeout}s)")
+        result = self._call_action("wait_screen_change", timeout=timeout, ctx=ctx)
+        self._set_var("_screen_changed", result)
+        self._emit("node_done", node_type="WAITSCREEN", args=str(timeout), line=node.line)
+
+    def _exec_screenstable(self, node: ASTNode, ctx: ExecutionContext):
+        args = self._interpolate(node.args)
+        timeout = float(args) if args else 30.0
+        self._emit("node_start", node_type="SCREENSTABLE", args=str(timeout), line=node.line)
+        self._log(f"SCREENSTABLE: 等待屏幕静止 (超时{timeout}s)")
+        result = self._call_action("wait_screen_stable", timeout=timeout, ctx=ctx)
+        self._set_var("_screen_stable", result)
+        self._emit("node_done", node_type="SCREENSTABLE", args=str(timeout), line=node.line)
 
     # ── 层次化 DSL 执行 ──────────────────────────────────────────
     def _exec_call(self, node: ASTNode, ctx: ExecutionContext):
@@ -480,12 +516,16 @@ class DSLExecutor:
 
             # 构建配置 dict
             config = {}
-            if config_str:
+            recurring = False
+            if event_key == "TIMER_INTERVAL":
+                config["interval"] = float(config_str) if config_str else 10.0
+                recurring = True
+            elif config_str:
                 config["path"] = config_str
                 config["title"] = config_str
                 config["name"] = config_str
 
-            inst = engine.register(spec_name, config, node.children)
+            inst = engine.register(spec_name, config, node.children, recurring=recurring)
             self._log(f"  [WHEN] {event_key} 已注册 (id={inst.id})")
         except Exception as e:
             self._log(f"  [WHEN] 注册失败: {e}")
