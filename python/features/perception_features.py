@@ -7,6 +7,30 @@ from features._utils import parse_region
 
 
 @feature(
+    name="region_select",
+    display_name="区域框选",
+    description="【交互·框选】弹出全屏选框界面，让用户用鼠标拖拽选择屏幕区域，返回坐标{x,y,w,h}。这是AI引导用户视觉选择区域的唯一方式。其他项目做不到——LLM不能看屏幕，更不可能让用户框选",
+    category=F.PERCEPTION,
+    params=[
+        P("message", "str", "提示用户框选区域的文字说明", required=False, default="请拖拽选择屏幕区域"),
+    ],
+    returns="dict{x, y, w, h} - 选中区域的坐标和尺寸",
+    dsl_keyword="REGION_SELECT",
+    dsl_template="REGION_SELECT var {message}",
+)
+def region_select(message: str = "请拖拽选择屏幕区域") -> dict:
+    try:
+        from interaction.region_picker import RegionPicker
+        region = RegionPicker.pick(message)
+        if region:
+            x, y, w, h = region
+            return {"x": x, "y": y, "w": w, "h": h}
+        return {"x": 0, "y": 0, "w": 0, "h": 0, "cancelled": True}
+    except ImportError:
+        return {"x": 0, "y": 0, "w": 0, "h": 0, "error": "region_picker 模块不可用"}
+
+
+@feature(
     name="ocr_find_text",
     display_name="OCR查找文字",
     description="【感知·定位】在屏幕或指定区域内用OCR查找文字，返回位置坐标(center_x/center_y)和置信度。用于定位按钮/文本后执行点击",
@@ -72,6 +96,8 @@ def ocr_extract_all(region: str = ""):
         P("find_all", "boolean", "是否查找所有匹配项", required=False, default=False),
     ],
     returns="dict{found, x, y, confidence} or list",
+    dsl_keyword="IMAGE_FIND",
+    dsl_template="IMAGE_FIND {template_name}",
     test_cases=[
         TC("nonexistent", {"template_name": "__nonexistent__"}, "success",
            validator=lambda r: r.get("success") and not r["result"]["found"]),

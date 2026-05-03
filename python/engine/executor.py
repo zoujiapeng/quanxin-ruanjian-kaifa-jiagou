@@ -311,6 +311,9 @@ class DSLExecutor:
         elif node.type == NodeType.REGION_SELECT:
             self._exec_region_select(node, ctx)
 
+        elif node.type == NodeType.IMAGE_FIND:
+            self._exec_image_find(node, ctx)
+
         # SUBROUTINE 定义直接跳过（已在 parser 注册）
 
     # ── 指令执行 ─────────────────────────────────────────────────
@@ -489,6 +492,19 @@ class DSLExecutor:
             self._log("  区域选择已取消")
         self._emit("node_done", node_type="REGION_SELECT", args=var_name, line=node.line)
 
+    def _exec_image_find(self, node: ASTNode, ctx: ExecutionContext):
+        """IMAGE_FIND template_name [AT x,y,w,h] — 图像模板匹配，设置变量"""
+        args = self._interpolate(node.args)
+        self._emit("node_start", node_type="IMAGE_FIND", args=args, line=node.line)
+        self._log(f"IMAGE_FIND: {args}")
+        result = self._call_action("image_find", args=args, ctx=ctx)
+        if isinstance(result, dict):
+            self._set_var("_image_found", result.get("found", False))
+            self._set_var("_image_x", result.get("center_x"))
+            self._set_var("_image_y", result.get("center_y"))
+            self._set_var("_image_confidence", result.get("confidence"))
+        self._emit("node_done", node_type="IMAGE_FIND", args=args, line=node.line)
+
     # ── 层次化 DSL 执行 ──────────────────────────────────────────
     def _exec_call(self, node: ASTNode, ctx: ExecutionContext):
         name = node.args
@@ -634,6 +650,8 @@ class DSLExecutor:
             last_err = None
             for attempt in range(1, retry_limit + 1):
                 try:
+                    if ctx is not None:
+                        kwargs["ctx"] = ctx
                     return self._action_handler(action, **kwargs)
                 except Exception as e:
                     last_err = e

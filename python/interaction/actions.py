@@ -7,6 +7,8 @@
 """
 
 from __future__ import annotations
+import os
+import re
 import time
 import math
 import random
@@ -272,9 +274,11 @@ class ActionHandler:
     实现所有 DSL 指令的底层动作
     """
 
-    def __init__(self):
+    def __init__(self, template_dir: str = ""):
+        abs_template_dir = template_dir or os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "templates"))
         self.ocr = OCREngine()
-        self.matcher = TemplateMatcher()
+        self.matcher = TemplateMatcher(template_dir=abs_template_dir)
         self.detector = ChangeDetector()
         self.clicker = ClickTarget(self.ocr, self.matcher)
         self.waiter = WaitCondition(self.ocr, self.matcher, self.detector)
@@ -301,6 +305,7 @@ class ActionHandler:
             "ocr_find": self._handle_ocr_find,
             "ocr_extract": self._handle_ocr_extract,
             "region_select": self._handle_region_select,
+            "image_find": self._handle_image_find,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -392,6 +397,25 @@ class ActionHandler:
         region = RegionPicker.pick(message)
         return region or (0, 0, 0, 0)
 
+    def _handle_image_find(self, args: str, ctx=None, **_) -> dict:
+        """IMAGE_FIND template_name [AT x,y,w,h] — 图像匹配并返回坐标"""
+        m = re.match(r"(\S+)(?:\s+AT\s+([\d,]+))?", args.strip(), re.IGNORECASE)
+        if not m:
+            return {"found": False, "error": f"无法解析 IMAGE_FIND 参数: {args}"}
+        template = m.group(1)
+        region = None
+        if m.group(2):
+            reg = self._parse_region(m.group(2))
+            if reg:
+                region = reg
+
+        match = self.matcher.find(template, region=region)
+        if match:
+            (cx, cy), confidence = match
+            return {"found": True, "center_x": cx, "center_y": cy,
+                    "confidence": confidence, "template": template}
+        return {"found": False, "template": template}
+
     @staticmethod
     def _parse_region(s: str):
         """'x,y,w,h' → (x, y, w, h)"""
@@ -402,6 +426,17 @@ class ActionHandler:
 
     def _handle_condition(self, condition: str, ctx=None, **_) -> bool:
         """执行条件判断"""
+        trimmed = condition.strip()
+        # 变量插值后的布尔字面量: {var} → "True" / "False"
+        if trimmed.upper() in ("TRUE", "FALSE"):
+            return trimmed.upper() == "TRUE"
+        # 裸变量名（无花括号）: IF _image_found — 从 ctx.variables 取真值
+        if ctx and re.fullmatch(r"\w+", trimmed) and trimmed in ctx.variables:
+            val = ctx.variables[trimmed]
+            if isinstance(val, bool):
+                return val
+            s = str(val).strip().lower()
+            return s not in ("", "false", "0", "none", "null")
         # 颜色条件: COLOR H,S,V AT x,y,w,h [MIN_RATIO N]
         if condition.upper().startswith("COLOR "):
             return self._check_color_condition(condition)
@@ -423,7 +458,6 @@ class ActionHandler:
 
     def _check_image_condition(self, condition: str) -> bool:
         """IMAGE template_name [AT x,y,w,h]"""
-        import re
         m = re.match(r"IMAGE\s+(\w+)(?:\s+AT\s+([\d,]+))?", condition, re.IGNORECASE)
         if not m:
             return False

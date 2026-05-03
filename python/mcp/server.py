@@ -58,6 +58,11 @@ def handle_tool_call(name: str, arguments: dict) -> str:
         "debug_list_features", "debug_validate_dsl", "debug_system_info",
         "debug_run_tests", "debug_get_logs", "debug_generate_test_flow",
         "dsl_to_graph", "graph_to_dsl", "parse_dsl",
+        # 感知 + 操作类（无需后端）
+        "find_image", "region_select", "screenshot",
+        "detect_color", "color_check", "detect_progress",
+        "ocr_find_text", "ocr_extract_all", "popup_close",
+        "click_target", "type_text", "hotkey",
     }
     if feature_name in local_features:
         result = registry.execute(feature_name, **arguments)
