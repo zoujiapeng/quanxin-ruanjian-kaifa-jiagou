@@ -5,7 +5,7 @@ dist-main/
 __pycache__/
 *.egg-info/
 .env
-*.lobster
+*.generated.lobster
 server.log
 .DS_Store
 Thumbs.db
