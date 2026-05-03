@@ -1,176 +1,186 @@
-# 🦞 Lobster — 低Token AI自动化执行系统
+# Lobster — Claude Code 的"双手"
 
-> AI只规划，本地全执行。极简DSL，极低token消耗。
-> 用户输入一句话 → AI生成DSL → 本地系统完成所有执行
+> Claude Code 负责规划，Lobster 负责执行。LOOP/WAIT/IF 在本地引擎跑，不消耗 API token。
+> MCP 是唯一的交互接口——Claude Code 通过 tools/list 发现能力、tools/call 调用能力。
 
 ---
 
 ## 架构概览
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   规划层 (LLM)                        │
-│  用户输入 → Claude API → DSL输出（1-3次调用）           │
-└───────────────────┬─────────────────────────────────┘
-                    │ DSL（每行一条指令）
-┌───────────────────▼─────────────────────────────────┐
-│                   执行层 (Python)                     │
-│  DSL解析 → AST → 状态机执行器 → 节点调度               │
-│  支持: 循环/条件/子流程/暂停/恢复/停止/自动重试/超时    │
-└───────────────────┬─────────────────────────────────┘
-                    │ 调用
-┌───────────────────▼─────────────────────────────────┐
-│                   感知层 (Modules)                    │
-│  图像识别(多尺度模板匹配) | OCR(Tesseract) | 交互      │
-│  人类行为模拟(贝塞尔曲线) | 弹窗处理 | 进度条检测       │
-└─────────────────────────────────────────────────────┘
+Claude Code (规划层)
+    │  MCP protocol (tools/list → tools/call)
+    ▼
+Lobster MCP Server (python/mcp/server.py)
+    │  @feature() registry (104 features)
+    ▼
+本地 DSL 执行引擎
+    │  LOOP / WAIT / IF / SUBROUTINE / PARALLEL / WHEN / WITH
+    ▼
+8 层架构: registry → features → dsl_parser → executor
+    → triggers → planner → healing → fusion
+```
+
+## 设计原则
+
+**新增功能只改一个文件** — `@feature()` 装饰器声明后，MCP 工具/CLI 命令/HTTP API/DSL 语法全部自动同步。
+
+## 与市面方案对比
+
+| 类别 | 代表 | Lobster 区别 |
+|------|------|-------------|
+| 通用 MCP 服务 | Playwright MCP, Browserbase | 不止浏览器，覆盖桌面/系统/跨应用 |
+| 桌面自动化框架 | PyAutoGUI, Playwright | 是 MCP 服务端，LLM 可直接调用 |
+| Agent 框架 | AutoGPT, CrewAI | 不自己做规划，专注执行层，免 token |
+
+**核心差异**: 免 token 控制流 + 桌面 GUI 操作 + MCP 协议驱动 + 指令库组合体系
+
+## 架构层次
+
+```
+registry          功能注册表（@feature 装饰器）
+    → features    104 个功能（action/perception/AI/system/control/...）
+    → dsl_parser  递归下降解析器（13 种 NodeType）
+    → executor    状态机执行器（IDLE/RUNNING/PAUSED/STOPPED/ERROR/FINISHED）
+    → triggers    反应式事件引擎（file/process/window/clipboard/network）
+    → planner     AI 规划引擎（observe→think→act→evaluate）
+    → store       SQLite 持久化（checkpoint/telemetry/vault）
+    → healing     自愈管道（retry→a11y→offset→escalate）
+    → fusion      多模态融合（OCR+image+a11y 加权投票）
+    → optimizer   Telemetry 驱动的 DSL 优化分析
+    → plugin      动态插件 SDK
 ```
 
 ## 项目结构
 
 ```
 lobster/
-├── electron/
-│   ├── src/
-│   │   ├── main/              # Electron 主进程
-│   │   │   ├── main.ts        # 窗口管理 + Python进程管理 + IPC
-│   │   │   └── preload.ts     # 安全桥接
-│   │   └── renderer/          # React 前端
-│   │       ├── components/
-│   │       │   ├── Canvas/     # 流程图画布 (React Flow)
-│   │       │   ├── NodeLibrary/ # 节点库面板
-│   │       │   ├── PropertyPanel/ # 属性编辑面板
-│   │       │   └── common/     # TopBar, StatusBar, LogPanel, SettingsModal
-│   │       ├── hooks/          # API + WebSocket hooks
-│   │       ├── store/          # Zustand 状态管理
-│   │       └── styles/         # 全局样式
-│   └── public/                 # 静态资源
 ├── python/
-│   ├── server.py               # Flask + SocketIO 后端服务器
-│   ├── engine/                 # 核心执行层
-│   │   ├── dsl_parser.py       # DSL解析器 → AST
-│   │   ├── executor.py         # 状态机执行器 (暂停/恢复/停止/重试)
-│   │   └── scheduler.py        # 优先级任务调度器
-│   ├── perception/             # 感知层模块
-│   │   ├── vision.py           # 截图/模板匹配/变化检测/颜色/进度条/场景
-│   │   └── ocr.py              # Tesseract OCR/模糊匹配/文字定位
-│   ├── interaction/            # 交互层模块
-│   │   └── actions.py          # 人类鼠标/键盘/语义点击/等待/弹窗/宏
-│   └── macros/                 # 宏扩展目录
-├── cli/
-│   └── lobster.py              # 命令行工具
-├── shared/
-│   └── types.ts                # TypeScript 共享类型
-├── lobster.bat                 # Windows CLI入口
-├── lobster                     # Unix CLI入口
-├── package.json                # 前端依赖
-├── tsconfig.json               # TypeScript 配置 (渲染进程)
-├── tsconfig.main.json          # TypeScript 配置 (主进程)
-├── vite.config.ts              # Vite 构建配置
-└── index.html                  # 入口HTML
+│   ├── server.py            # Flask + SocketIO 后端 (/api/feature/<name> 自动路由)
+│   ├── mcp/server.py        # MCP stdio 服务端（registry 动态生成工具 + 流式通知）
+│   ├── cli/lobster.py       # CLI 入口（flat dispatch）
+│   ├── features/            # 功能注册文件（@feature 装饰器）
+│   │   ├── registry.py      # 注册表核心
+│   │   ├── action_features.py
+│   │   ├── perception_features.py
+│   │   ├── ai_debug_features.py
+│   │   ├── system_features.py
+│   │   ├── dsl_features.py
+│   │   ├── browser_features.py      (待完善)
+│   │   ├── input_features.py        (待完善)
+│   │   ├── window_features.py       (待完善)
+│   │   ├── system_control_features.py (待完善)
+│   │   ├── clipboard_features.py    (待完善)
+│   │   ├── network_features.py      (待完善)
+│   │   ├── timer_features.py        (待完善)
+│   │   ├── filedialog_features.py   (待完善)
+│   │   ├── a11y_features.py         (待完善)
+│   │   ├── macro_features.py        (待完善)
+│   │   ├── multimedia_features.py   (待完善)
+│   │   ├── fusion_features.py
+│   │   ├── persistence_features.py
+│   │   ├── healing_features.py
+│   │   ├── trigger_features.py
+│   │   ├── ai_plan_features.py
+│   │   └── plugin_features.py
+│   ├── engine/
+│   │   ├── dsl_parser.py    # DSL 解析器（CLICK/WAIT/LOOP/IF/SUBROUTINE/CALL/PARALLEL/WHEN/WITH）
+│   │   ├── executor.py      # 状态机执行器（暂停/恢复/停止/重试/自愈/线程安全）
+│   │   ├── scheduler.py     # 任务调度器
+│   │   ├── triggers.py      # 反应式事件引擎
+│   │   ├── planner.py       # AI 规划引擎（LLM 闭环 + 持久化 checkpoint）
+│   │   ├── store.py         # SQLite 持久化存储
+│   │   ├── healing.py       # 自愈管道
+│   │   └── optimizer.py     # Telemetry 驱动优化分析
+│   ├── perception/          # 感知层
+│   │   ├── vision.py        # 截图/模板匹配/变化检测/颜色/进度条
+│   │   ├── ocr.py           # OCR 引擎（PaddleOCR→EasyOCR→Tesseract 降级）
+│   │   └── fusion.py        # 多模态融合引擎
+│   └── interaction/
+│       └── actions.py       # 鼠标/键盘/语义点击/等待/弹窗/宏
+├── electron/                # Electron 前端
+│   ├── src/main/            # Electron 主进程
+│   ├── src/renderer/        # React 前端（React Flow + Zustand）
+│   └── public/
+├── cli/                     # CLI 入口
+├── shared/types.ts          # TypeScript 共享类型
+├── tests/run_tests.py       # 测试套件（注册表/解析器/往返/单元测试）
+└── CLAUDE.md                # Claude Code 指令
 ```
 
 ## 快速开始
 
-### 1. 安装前端依赖
-```bash
-npm install
-```
-
-### 2. 安装后端依赖
+### 1. 安装后端依赖
 ```bash
 cd python
 pip install -r requirements.txt
-
-# 如需OCR功能，还需安装Tesseract:
-# Windows: https://github.com/UB-Mannheim/tesseract/wiki
-# macOS: brew install tesseract
-# Linux: sudo apt install tesseract-ocr tesseract-ocr-chi-sim
 ```
 
-### 3. 启动开发模式
-
+### 2. 启动后端
 ```bash
-# 终端1: 启动Python后端
 cd python && python server.py
-
-# 终端2: 启动Electron + Vite
-npm run start
+# Lobster v2 | Port:7788 | Features:104 | REAL
 ```
 
-或单独启动 Vite 前端开发服务器:
+### 3. MCP 配置 (Claude Desktop)
+```json
+{
+  "mcpServers": {
+    "lobster": {
+      "command": "python",
+      "args": ["C:\\Users\\zou\\Desktop\\claude1\\cli\\lobster_mcp.py"]
+    }
+  }
+}
+```
+
+### 4. CLI 使用
 ```bash
-npm run dev
+lobster list              # 查看所有功能
+lobster info click-target # 查看功能详情
+lobster parse "CLICK 目标" # 验证 DSL
+lobster test              # 运行测试
 ```
 
-### 4. CLI工具
+### 5. 运行测试
 ```bash
-# 解析DSL
-python cli/lobster.py parse "CLICK 开始游戏"
-
-# 执行DSL（需后端运行）
-python cli/lobster.py run "CLICK 开始游戏"
-
-# 从文件读取执行
-python cli/lobster.py run-file tasks.lobster
-
-# AI生成DSL（需配置API Key）
-ANTHROPIC_API_KEY=sk-ant-... python cli/lobster.py api "帮我打开浏览器搜索天气"
-
-# 检查后端
-python cli/lobster.py health
+python tests/run_tests.py
+# 104 功能注册, DSL 解析器/往返/单元测试全部通过
 ```
 
-## DSL语法
+## DSL 语法
 
 ```
-CLICK <target>         # 点击目标（文字/图像/坐标 x,y）
-WAIT <condition>       # 等待条件: 文字/图像:XXX/稳定/变化/消失:XXX
-LOOP <tag>             # 开始循环（标签可选）
-IF <condition>         # 条件判断
-ELSE                   # 否则分支（可选）
-END                    # 结束 LOOP 或 IF 块
-RUN <macro>            # 执行宏: 副本/刷任务/领取奖励/自动恢复
+CLICK <target>                    # 点击目标（文字/图像/坐标）
+WAIT <condition>                  # 等待条件
+LOOP <tag>  ...  END              # 循环
+IF <cond>  ...  [ELSE ...]  END   # 条件判断
+SUBROUTINE name(p1, p2) ... END   # 子程序定义
+CALL name(arg1, arg2)             # 调用子程序
+IMPORT "<path>"                   # 导入外部 DSL
+RETURN [value]                    # 从子程序返回
+PARALLEL ... WITH ...  END        # 并行分支（支持异质执行）
+WHEN EVENT_TYPE config ... END    # 事件触发
+WITH <handler> ... END            # 异质执行（临时切换 action handler）
 ```
 
-### 示例
-```
-CLICK 开始游戏
-WAIT 加载完成
-LOOP 副本循环
-  IF 血量低于30%
-    RUN 自动恢复
-  ELSE
-    CLICK 攻击按钮
-  END
-  RUN 副本
-  RUN 领取奖励
-  WAIT 结算界面
-END
-```
+## API 接口
 
-## 三层架构
-
-| 层级 | 技术 | 职责 |
-|------|------|------|
-| **规划层** | Claude API | 用户输入 → DSL 输出，不参与执行 |
-| **执行层** | Python (状态机) | DSL解析→AST→节点调度→暂停/恢复/停止/重试 |
-| **感知层** | OpenCV/Tesseract/pyautogui | 图像识别/OCR/鼠标键盘/人类行为模拟 |
-
-## API接口
-
-- `GET /api/health` - 健康检查
-- `POST /api/dsl/parse` - DSL解析
-- `POST /api/dsl/run` - 提交执行
-- `POST /api/executor/pause` - 暂停
-- `POST /api/executor/resume` - 恢复
-- `POST /api/executor/stop` - 停止
-- `GET /api/executor/status` - 状态查询
-- `POST /api/ai/generate` - AI生成DSL
-- `GET /api/screenshot` - 截图
+- `GET /api/health` — 健康检查
+- `GET /api/registry?format=json|markdown|mcp|openapi|dsl` — 注册表导出
+- `POST/GET /api/feature/<name>` — 调用功能（自动类型转换）
+- `POST /api/dsl/parse` — DSL 解析
+- `POST /api/dsl/run` / `run-sync` — DSL 执行
+- `GET /api/dsl/state` — DSL 热重载状态
+- `POST /api/executor/pause|resume|stop` — 执行器控制
+- `GET /api/executor/status` — 执行器状态
+- `GET /api/logs` — 日志
+- WebSocket: `node_highlight`, `dsl_update`, `dsl_parse_validate` — 实时事件
 
 ## 技术栈
 
-- **前端**: Electron 28 + React 18 + TypeScript + Vite 5 + React Flow 11 + Zustand 4
-- **后端**: Python 3.10+ / Flask / SocketIO / OpenCV / Tesseract / pyautogui
-- **通信**: REST API + WebSocket
+- **MCP 协议**: stdio JSON-RPC (tools/list + tools/call + 流式 notification)
+- **后端**: Python 3.10+ / Flask / SocketIO / SQLite
+- **感知**: OpenCV / Tesseract / PaddleOCR / EasyOCR
+- **交互**: pyautogui / win32gui / pyperclip / psutil
+- **前端** (Electron): React 18 + TypeScript + React Flow 11 + Zustand 4
