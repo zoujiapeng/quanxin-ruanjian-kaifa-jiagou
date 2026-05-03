@@ -117,6 +117,8 @@ class DSLExecutor:
         """解析并异步执行 DSL"""
         if self._state == ExecutorState.RUNNING:
             raise ExecutionError("执行器已在运行中")
+        if self._state in (ExecutorState.ERROR, ExecutorState.FINISHED):
+            self._reset_state_no_run()
         try:
             parser = DSLParser()
             ast = parser.parse(source)
@@ -133,6 +135,8 @@ class DSLExecutor:
 
     def run_dsl_sync(self, source: str, ctx: Optional[ExecutionContext] = None):
         """同步执行 DSL（阻塞），返回结果 dict"""
+        if self._state in (ExecutorState.ERROR, ExecutorState.FINISHED):
+            self._reset_state_no_run()
         try:
             parser = DSLParser()
             ast = parser.parse(source)
@@ -156,6 +160,20 @@ class DSLExecutor:
         self._scope_stack = [dict(ctx.variables)]
         self._call_depth = 0
         self._set_state(ExecutorState.RUNNING)
+
+    def _reset_state_no_run(self):
+        """从 ERROR/FINISHED 重置回 IDLE，不清除 scope"""
+        self._stop_flag.clear()
+        self._pause_event.set()
+        self._set_state(ExecutorState.IDLE)
+
+    def reset(self):
+        """公开 API：将执行器重置为 IDLE 状态，清除作用域"""
+        self._stop_flag.clear()
+        self._pause_event.set()
+        self._scope_stack = [{}]
+        self._call_depth = 0
+        self._set_state(ExecutorState.IDLE)
 
     def pause(self):
         if self._state == ExecutorState.RUNNING:
@@ -191,8 +209,8 @@ class DSLExecutor:
         for cb in self._callbacks.get(event, []):
             try:
                 cb(**kwargs)
-            except Exception:
-                pass
+            except Exception as e:
+                self._log(f"  [emit] {event} callback error: {e}")
 
     # ── 内部执行 ─────────────────────────────────────────────────
     def _run_thread(self, ast: ASTNode, ctx: ExecutionContext):

@@ -112,7 +112,7 @@ python/
 │   ├── perception_features.py # 感知功能 (7)
 │   ├── ai_debug_features.py   # AI + 调试功能 (9)
 │   ├── system_features.py     # 系统功能 (6)
-│   └── feature_template.py    # 新增功能模板
+│   └── _feature_template.py    # 新增功能模板（私有，不会自动注册）
 ├── engine/                    # DSL 执行引擎
 │   ├── dsl_parser.py          # 递归下降解析器
 │   ├── executor.py            # 状态机执行器
@@ -211,7 +211,7 @@ if sys.platform == "win32":
 3. 验证: lobster test && lobster list
 ```
 
-详细模板见 `python/features/feature_template.py`。
+详细模板见 `python/features/_feature_template.py`。
 
 ## 文件关系图
 
